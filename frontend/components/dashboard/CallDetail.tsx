@@ -3,7 +3,7 @@
 import { useEffect, useState, useRef } from 'react';
 import {
   getCallById, getTranscript, getEntities, getIntents, getCompliance, getFraudSignals, getEmotions,
-  getObligations, getTamperSignals, getAudioUrl,
+  getObligations, getTamperSignals, getAudioUrl, downloadCallJson, downloadMaskedTranscript,
   type Call, type TranscriptMessage, type Entity, type Intent, type ComplianceRule, type FraudSignal, type EmotionData,
   type Obligation, type TamperSignal,
 } from '@/lib/api';
@@ -186,9 +186,27 @@ export default function CallDetail({ callId, onBack }: CallDetailProps) {
 
   return (
     <div>
-      <button className="btn btn-ghost" onClick={onBack} style={{ marginBottom: 'var(--sp-4)', fontFamily: 'var(--font-mono)' }}>
-        &larr; Back to calls
-      </button>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--sp-4)' }}>
+        <button className="btn btn-ghost" onClick={onBack} style={{ fontFamily: 'var(--font-mono)' }}>
+          &larr; Back to calls
+        </button>
+        <div style={{ display: 'flex', gap: 'var(--sp-2)' }}>
+          <button
+            className="btn btn-ghost"
+            onClick={() => downloadCallJson(callId)}
+            style={{ fontFamily: 'var(--font-mono)', fontSize: '0.75rem' }}
+          >
+            &#x2913; JSON
+          </button>
+          <button
+            className="btn btn-ghost"
+            onClick={() => downloadMaskedTranscript(callId)}
+            style={{ fontFamily: 'var(--font-mono)', fontSize: '0.75rem' }}
+          >
+            &#x2913; Masked Transcript
+          </button>
+        </div>
+      </div>
 
       {/* Header */}
       <div className="call-detail-header">

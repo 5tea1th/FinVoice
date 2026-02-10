@@ -24,7 +24,7 @@ from loguru import logger
 from services.audio.normalizer import normalize_audio
 from services.audio.quality import assess_audio_quality
 from services.audio.cleanup import cleanup_audio
-from services.asr.transcriber import transcribe_audio
+from services.asr.transcriber import transcribe_audio, unload_whisperx, reload_whisperx
 from services.llm.client import extract_structured, extract_raw, unload_ollama_model
 from analysis.intelligence import extract_all_entities_layer1
 from analysis.compliance import run_compliance_checks
@@ -34,6 +34,7 @@ from analysis.profanity import detect_profanity
 from analysis.tamper_detection import run_tamper_detection
 from analysis.sentiment import (
     compute_sentiment_trajectories,
+    interpret_sentiment_context,
     classify_for_llm_routing,
     classify_intent,
     has_intent_model,
@@ -84,6 +85,71 @@ LANGUAGE_NAMES = {
     "mr": "Marathi", "gu": "Gujarati", "kn": "Kannada",
     "ml": "Malayalam", "pa": "Punjabi", "ur": "Urdu",
 }
+
+
+def _get_llm_model(lang: str) -> str:
+    """Select LLM model based on detected language.
+
+    English → qwen2.5:3b (faster, lighter, sufficient since FinBERT handles most work).
+    Non-English → qwen3:8b (stronger multilingual, better code-switching understanding).
+    """
+    if lang == "en":
+        return "qwen2.5:3b"
+    return "qwen3:8b"
+
+
+# Few-shot examples for Hindi/Tamil code-switched financial text
+_HINDI_FEW_SHOT = (
+    "\nExamples of Hindi/code-switched financial text:\n"
+    "  [customer]: EMI due date 15 March hai, payment UPI se karna hoga → intent: info_request\n"
+    "  [customer]: Haan ji, main Friday tak 5000 rupaye jama kar dunga → intent: payment_promise\n"
+    "  [customer]: Mujhe yeh loan nahi chahiye, cancel kar dijiye → intent: refusal\n"
+    "  [agent]: Aapka outstanding balance 25,000 hai, aur late fee 500 lagi hai → intent: info_request\n"
+    "  [customer]: Mujhe manager se baat karni hai → intent: escalation\n"
+)
+
+_TAMIL_FEW_SHOT = (
+    "\nExamples of Tamil/code-switched financial text:\n"
+    "  [customer]: EMI amount evvalavu? Next due date enna? → intent: info_request\n"
+    "  [customer]: Sari, naan Friday kulla pay panren → intent: payment_promise\n"
+    "  [customer]: Enakku indha loan venaam, cancel pannunga → intent: refusal\n"
+    "  [agent]: Ungal outstanding balance 25,000 rupees, late fee 500 → intent: info_request\n"
+    "  [customer]: Manager kitta pesunum → intent: escalation\n"
+)
+
+_HINDI_ENTITY_FEW_SHOT = (
+    "\nExamples of Hindi/code-switched entities:\n"
+    "  'paanch hazaar ki EMI' → ENTITY|currency_amount|5000|paanch hazaar ki EMI\n"
+    "  'pandrah March tak' → ENTITY|date|March 15|pandrah March tak\n"
+    "  'home loan ka interest rate' → ENTITY|product_name|home_loan|home loan ka interest rate\n"
+)
+
+_TAMIL_ENTITY_FEW_SHOT = (
+    "\nExamples of Tamil/code-switched entities:\n"
+    "  'aimbadhu aayiram EMI' → ENTITY|currency_amount|50000|aimbadhu aayiram EMI\n"
+    "  'March pathinarndhu kulla' → ENTITY|date|March 15|March pathinarndhu kulla\n"
+    "  'home loan interest rate evvalavu' → ENTITY|product_name|home_loan|home loan interest rate\n"
+)
+
+
+def _get_few_shot_examples(lang: str, task: str = "intent") -> str:
+    """Get language-specific few-shot examples for LLM prompts."""
+    if lang == "en":
+        return ""
+    if task == "intent":
+        if lang == "hi":
+            return _HINDI_FEW_SHOT
+        elif lang == "ta":
+            return _TAMIL_FEW_SHOT
+        # For other non-English languages, use Hindi examples as closest reference
+        return _HINDI_FEW_SHOT
+    elif task == "entity":
+        if lang == "hi":
+            return _HINDI_ENTITY_FEW_SHOT
+        elif lang == "ta":
+            return _TAMIL_ENTITY_FEW_SHOT
+        return _HINDI_ENTITY_FEW_SHOT
+    return ""
 
 
 def process_call(
@@ -184,6 +250,7 @@ def process_call(
     _progress("3", "Transcribing with WhisperX")
 
     # ── STAGE 3: FINANCIAL TRANSCRIPTION (GPU — ~3GB VRAM) ──
+    # WhisperX is pre-loaded at server startup — transcription starts instantly.
     logger.info(f"[{call_id}] Stage 3: Transcribing with WhisperX")
     transcript = transcribe_audio(
         wav_path,
@@ -191,15 +258,20 @@ def process_call(
         language=None,  # Auto-detect language
         hf_token=hf_token,
     )
-    # WhisperX unloads itself — verify VRAM is free
-    vram_mb = torch.cuda.memory_allocated() / 1024 / 1024
-    if vram_mb > 500:
-        logger.warning(f"[{call_id}] VRAM not fully freed after WhisperX: {vram_mb:.0f} MB")
-        torch.cuda.empty_cache()
+    # Unload WhisperX to free VRAM for emotion2vec + Ollama
+    unload_whisperx()
+    logger.info(f"[{call_id}] WhisperX unloaded — VRAM free for analysis stages")
 
     segments = transcript["segments"]
     detected_lang = transcript.get("language", "en")
     logger.info(f"[{call_id}] Transcribed {len(segments)} segments (language={detected_lang})")
+
+    # Auto-detect call type from transcript if user didn't specify
+    if call_type == "general":
+        detected_type = _auto_detect_call_type(segments)
+        if detected_type != "general":
+            logger.info(f"[{call_id}] Auto-detected call type: {detected_type} (was 'general')")
+            call_type = detected_type
 
     # Map speaker roles (SPEAKER_00 → agent, SPEAKER_01 → customer)
     segments = _map_speaker_roles(segments, call_type)
@@ -207,11 +279,20 @@ def process_call(
     # Smart speaker identification — match speaker IDs to real names from transcript
     segments = _identify_speakers_by_name(segments)
 
+    # Per-segment language tagging (detects code-switching)
+    from analysis.language_tagging import tag_segment_languages
+    lang_metadata = tag_segment_languages(segments, fallback_lang=detected_lang)
+    has_code_switching = lang_metadata.get("has_code_switching", False)
+    if has_code_switching:
+        logger.info(f"[{call_id}] Code-switching detected: {lang_metadata['language_distribution']}")
+
     completed.append("3")
     _stage_timer("Stage 4: Analysis (parallel)")
     _progress("4A", "CPU + GPU analysis (parallel)", extra={
         "transcript_segments": len(segments),
         "transcript_language": detected_lang,
+        "has_code_switching": has_code_switching,
+        "language_distribution": lang_metadata.get("language_distribution", {}),
     })
 
     # ── STAGE 4: UNDERSTAND FINANCIAL MEANING ──
@@ -231,7 +312,8 @@ def process_call(
     ollama_preload_future = None
 
     def _preload_ollama():
-        preload_ollama_model("qwen2.5:3b", keep_alive="5m")
+        llm_model = _get_llm_model(detected_lang)
+        preload_ollama_model(llm_model, keep_alive="5m")
 
     # emotion2vec wrapper — runs on GPU thread, unloads when done
     def _run_emotion2vec():
@@ -254,22 +336,34 @@ def process_call(
         f_fraud = pool.submit(run_fraud_detection, wav_path, segments)
         f_pii = pool.submit(detect_pii, segments, 0.5, detected_lang)
         f_profanity = pool.submit(detect_profanity, segments)
-        f_tamper = pool.submit(run_tamper_detection, wav_path)
+        f_tamper = pool.submit(run_tamper_detection, wav_path, source_codec=audio_meta.get("original_format", ""))
 
         # GPU stage — runs simultaneously since CPU stages don't use GPU
         f_emotion = pool.submit(_run_emotion2vec)
 
-        # Preload Ollama after emotion2vec finishes (chained via wrapper above)
-        ollama_preload_future = pool.submit(_preload_ollama)
+        # Preload Ollama AFTER emotion2vec finishes — they share GPU VRAM.
+        # Use a callback on the emotion2vec future to trigger the preload.
+        def _chain_ollama_preload(emotion_future):
+            try:
+                emotion_future.result()  # wait for emotion2vec to finish + unload
+            except Exception:
+                pass  # emotion2vec failure shouldn't block LLM
+            _preload_ollama()
+
+        ollama_preload_future = pool.submit(_chain_ollama_preload, f_emotion)
 
         # Collect results — each stage is independent
         try:
             customer_sentiment, agent_sentiment = f_sentiment.result()
             customer_emotion = get_dominant_emotion(customer_sentiment)
+            sentiment_context = interpret_sentiment_context(
+                customer_sentiment, agent_sentiment, call_type
+            )
         except Exception as e:
             logger.error(f"[{call_id}] Sentiment failed: {e}")
             customer_sentiment, agent_sentiment = [], []
             customer_emotion = "neutral"
+            sentiment_context = {}
 
         try:
             layer1_entities = f_entities.result()
@@ -311,13 +405,15 @@ def process_call(
         segment_emotions = []
         emotion_distribution = {}
         speaker_emotion_breakdown = {}
+        emotion_transitions = []
         try:
             segment_emotions, emotion_summary = f_emotion.result()
             emotion_distribution = emotion_summary.get("emotion_distribution", {})
-            # Per-speaker emotion breakdown
+            # Per-speaker emotion breakdown + transition detection
             if segment_emotions:
-                from services.emotion.emotion2vec_analyzer import get_speaker_emotion_breakdown
+                from services.emotion.emotion2vec_analyzer import get_speaker_emotion_breakdown, detect_emotion_transitions
                 speaker_emotion_breakdown = get_speaker_emotion_breakdown(segment_emotions)
+                emotion_transitions = detect_emotion_transitions(segment_emotions)
         except Exception as e:
             logger.warning(f"[{call_id}] emotion2vec failed (continuing without): {e}")
 
@@ -350,12 +446,12 @@ def process_call(
 
     # Intent classification (FinBERT pre-filter — often skips Ollama entirely)
     try:
-        intents = _classify_intents_with_prefilter(segments, lang=detected_lang)
+        intents = _classify_intents_with_prefilter(segments, lang=detected_lang, call_type=call_type)
     except Exception as e:
         logger.error(f"[{call_id}] Intent classification failed: {e}")
         intents = []
 
-    # Run 3 LLM calls in parallel (each uses qwen2.5:3b with 60s timeout)
+    # Run 3 LLM calls in parallel (model selected by language)
     from concurrent.futures import ThreadPoolExecutor as _LLMPool
     with _LLMPool(max_workers=3) as llm_pool:
         f_ent = llm_pool.submit(_extract_entities_llm, segments, detected_lang)
@@ -382,11 +478,17 @@ def process_call(
     # Merge Layer 1 + Layer 2 entities
     all_entities = _merge_entities(layer1_entities, llm_entities)
 
-    # Free Ollama VRAM
+    # Free Ollama VRAM, then reload WhisperX for next call
     try:
-        unload_ollama_model("qwen2.5:3b")
+        unload_ollama_model(_get_llm_model(detected_lang))
     except Exception:
         pass
+
+    # Reload WhisperX into GPU — ready for the next call instantly.
+    # This runs in a background thread so it doesn't block Stage 5 (CPU-only).
+    _reload_future = None
+    with ThreadPoolExecutor(max_workers=1) as reload_pool:
+        _reload_future = reload_pool.submit(reload_whisperx)
 
     completed.append("4I")
     _stage_timer("Stage 5: Output")
@@ -395,39 +497,55 @@ def process_call(
     # ── STAGE 5: PRODUCE OUTPUT (CPU) ──
     logger.info(f"[{call_id}] Stage 5: Generating output")
 
-    # Compute speaker talk percentages
-    agent_segs = [s for s in segments if s.get("speaker", "").lower() in ("agent", "speaker_00")]
-    customer_segs = [s for s in segments if s.get("speaker", "").lower() in ("customer", "speaker_01")]
+    # Compute speaker talk percentages (handles both agent/customer and Speaker A/B labels)
+    agent_segs = [s for s in segments if s.get("speaker", "").lower() in ("agent", "speaker_00", "speaker a")]
+    customer_segs = [s for s in segments if s.get("speaker", "").lower() in ("customer", "speaker_01", "speaker b")]
     total_dur = max(audio_meta["original_duration"], 0.01)
     agent_dur = sum(s.get("end", 0) - s.get("start", 0) for s in agent_segs)
     customer_dur = sum(s.get("end", 0) - s.get("start", 0) for s in customer_segs)
 
-    # Risk assessment
+    # Risk assessment — weighted by call type
     num_violations = len([c for c in compliance_checks if not c.passed])
     num_fraud = len(fraud_signals)
-    if num_violations >= 3 or num_fraud >= 2 or any(
+
+    # Call-type weighting: regulated calls escalate faster, general calls de-escalate
+    call_type_weights = {
+        "collections": 1.5, "kyc": 2.0, "consent": 1.5,
+        "complaint": 1.2, "onboarding": 1.0, "general": 0.3,
+    }
+    weight = call_type_weights.get(call_type, 1.0)
+    weighted_violations = num_violations * weight
+    weighted_fraud = num_fraud * weight
+
+    has_critical = any(
         c.severity == "critical" for c in compliance_checks if not c.passed
-    ):
+    )
+
+    if (has_critical and weight >= 1.0) or weighted_violations >= 3 or weighted_fraud >= 2:
         risk_level = RiskLevel.CRITICAL
-    elif num_violations >= 2 or num_fraud >= 1:
+    elif weighted_violations >= 2 or weighted_fraud >= 1:
         risk_level = RiskLevel.HIGH
-    elif num_violations >= 1:
+    elif weighted_violations >= 1:
         risk_level = RiskLevel.MEDIUM
     else:
         risk_level = RiskLevel.LOW
 
-    compliance_score = max(0, 100 - (num_violations * 15))
+    # Compliance score: penalty per violation, scaled by call type weight
+    violation_penalty = int(15 * weight)
+    compliance_score = max(0, 100 - (num_violations * violation_penalty))
 
     # Escalation detection
     escalation = any(
         i.intent == CallIntent.ESCALATION for i in intents
     ) or customer_emotion in ("angry", "frustrated")
 
-    # Tamper risk assessment
+    # Tamper risk assessment — require corroboration across signal types
     high_tamper = sum(1 for t in tamper_signals if t.severity == "high")
-    if high_tamper >= 3:
+    tamper_signal_types = set(t.signal_type for t in tamper_signals)
+    num_types = len(tamper_signal_types)
+    if num_types >= 3 and high_tamper >= 2:
         tamper_risk = "high"
-    elif high_tamper >= 1 or len(tamper_signals) >= 5:
+    elif num_types >= 2 and (high_tamper >= 1 or len(tamper_signals) >= 4):
         tamper_risk = "medium"
     elif tamper_signals:
         tamper_risk = "low"
@@ -459,14 +577,26 @@ def process_call(
     # Build clean transcript segments for output
     transcript_segments = []
     for i, seg in enumerate(segments):
-        transcript_segments.append({
+        seg_out = {
             "id": i,
             "start": round(seg.get("start", 0), 2),
             "end": round(seg.get("end", 0), 2),
             "text": seg.get("text", ""),
             "speaker": seg.get("speaker", "unknown"),
             "confidence": seg.get("confidence", 0.5),
-        })
+        }
+        # Include per-word timestamps from WhisperX alignment
+        if seg.get("words"):
+            seg_out["words"] = [
+                {
+                    "word": w.get("word", ""),
+                    "start": round(w.get("start", 0), 3),
+                    "end": round(w.get("end", 0), 3),
+                    "score": round(w.get("score", 0), 3) if w.get("score") is not None else None,
+                }
+                for w in seg["words"]
+            ]
+        transcript_segments.append(seg_out)
 
     # Use language detected earlier (line ~89)
     detected_language = detected_lang
@@ -502,11 +632,15 @@ def process_call(
         segment_emotions=[e.model_dump() for e in segment_emotions],
         emotion_distribution=emotion_distribution,
         speaker_emotion_breakdown=speaker_emotion_breakdown,
+        emotion_transitions=emotion_transitions,
         pipeline_timings=stage_times,
         detected_language=detected_language,
+        has_code_switching=has_code_switching,
+        language_distribution=lang_metadata.get("language_distribution", {}),
         customer_sentiment_trajectory=customer_sentiment,
         agent_sentiment_trajectory=agent_sentiment,
         customer_emotion_dominant=customer_emotion,
+        sentiment_context=sentiment_context,
         escalation_detected=escalation,
         overall_risk_level=risk_level,
         compliance_score=compliance_score,
@@ -533,6 +667,14 @@ def process_call(
     logger.info(f"[{call_id}] Pipeline complete in {total_elapsed:.0f}s — {timing_str}")
     _progress("done", "Complete", status="complete")
 
+    # Wait for WhisperX reload to finish (runs in background during Stage 5)
+    if _reload_future:
+        try:
+            _reload_future.result(timeout=180)
+            logger.info(f"[{call_id}] WhisperX reloaded — ready for next call")
+        except Exception as e:
+            logger.warning(f"[{call_id}] WhisperX reload failed: {e}")
+
     # ── BACKBOARD: Audit trail + customer memory (non-blocking) ──
     if backboard_configured():
         logger.info(f"[{call_id}] Storing in Backboard audit trail")
@@ -541,17 +683,21 @@ def process_call(
     return call_record
 
 
-def _classify_intents_with_prefilter(segments: list, lang: str = "en") -> list[UtteranceIntent]:
+def _classify_intents_with_prefilter(segments: list, lang: str = "en", call_type: str = "general") -> list[UtteranceIntent]:
     """Classify intents using FinBERT pre-filter + raw LLM call (no Instructor).
 
     ~40% of utterances skip the LLM entirely (greetings, acknowledgments).
     Remaining utterances are batched into a SINGLE raw LLM call with line-based
     output parsing — no Instructor, no JSON mode, no retry loops.
+
+    Call-type context shapes the prompt: general calls bias toward info_request,
+    collections toward payment_promise/refusal/dispute.
     """
     VALID_INTENTS = {
         "agreement", "refusal", "request_extension", "payment_promise",
         "complaint", "consent_given", "consent_denied", "info_request",
         "negotiation", "escalation", "dispute", "acknowledgment", "greeting",
+        "unknown",
     }
 
     intents = []
@@ -625,61 +771,99 @@ def _classify_intents_with_prefilter(segments: list, lang: str = "en") -> list[U
         for idx, (seg_i, text, speaker, route) in enumerate(batch):
             classify_list.append(f"{idx}. [{speaker}]: {text}")
 
+        # Call-type context shapes which intents are most likely
+        if call_type == "collections":
+            type_hint = (
+                "This is a COLLECTIONS call (debt recovery). "
+                "Common intents: payment_promise, refusal, request_extension, dispute, complaint, negotiation."
+            )
+        elif call_type in ("kyc", "onboarding", "consent"):
+            type_hint = (
+                f"This is a {call_type.upper()} call. "
+                "Common intents: consent_given, consent_denied, info_request, agreement."
+            )
+        elif call_type == "complaint":
+            type_hint = (
+                "This is a COMPLAINT call. "
+                "Common intents: complaint, escalation, dispute, info_request."
+            )
+        else:
+            type_hint = (
+                "This is a GENERAL financial call (earnings, advisory, or informational). "
+                "Common intents: info_request, acknowledgment, agreement. "
+                "Avoid labeling financial discussion as dispute/complaint unless clearly adversarial."
+            )
+
         prompt = (
             f"Classify the intent of each utterance in a financial phone call.\n"
-            f"{lang_context}\n"
+            f"{lang_context}"
+            f"{type_hint}\n\n"
             f"CONVERSATION CONTEXT:\n{conv_text}\n\n"
             f"CLASSIFY THESE UTTERANCES:\n"
             + "\n".join(classify_list) + "\n\n"
             f"Valid intents: agreement, refusal, request_extension, payment_promise, "
             f"complaint, consent_given, consent_denied, info_request, negotiation, "
-            f"escalation, dispute, acknowledgment, greeting\n\n"
+            f"escalation, dispute, acknowledgment, greeting, unknown\n\n"
             f"For EACH utterance, output exactly one line:\n"
-            f"IDX|intent\n"
-            f"Example: 0|agreement\n"
-            f"Example: 1|info_request\n\n"
+            f"IDX|intent|confidence\n"
+            f"Where confidence is 0.0-1.0 (how certain you are).\n"
+            f"Example: 0|agreement|0.90\n"
+            f"Example: 1|info_request|0.75\n"
+            f"Example: 2|unknown|0.40\n\n"
             f"Use conversation context: 'Yes' after payment question = agreement. "
             f"Agent giving info = info_request. Customer confirming identity = consent_given.\n"
-            f"Output ONLY the IDX|intent lines, nothing else."
+            f"Use 'unknown' if the intent is genuinely ambiguous.\n"
+            f"{_get_few_shot_examples(lang, 'intent')}"
+            f"Output ONLY the IDX|intent|confidence lines, nothing else."
         )
 
         try:
             from services.llm.client import extract_raw
-            raw = extract_raw(prompt, model="qwen2.5:3b", timeout=45)
+            raw = extract_raw(prompt, model=_get_llm_model(lang), timeout=45)
 
-            # Parse line-based output: "0|agreement", "1|info_request", etc.
+            # Parse line-based output: "0|agreement|0.85", "1|info_request|0.70", etc.
             classified_indices = set()
             for line in raw.strip().split("\n"):
                 line = line.strip().strip("-").strip("*").strip()
                 if "|" not in line:
                     continue
-                parts = line.split("|", 1)
+                parts = line.split("|")
                 try:
                     idx = int(parts[0].strip())
                     intent_str = parts[1].strip().lower().replace(" ", "_")
                     if idx < 0 or idx >= len(batch):
                         continue
                     if intent_str not in VALID_INTENTS:
-                        intent_str = "acknowledgment"
+                        intent_str = "unknown"
+
+                    # Parse LLM-provided confidence (3rd field), fallback to 0.70
+                    conf = 0.70
+                    if len(parts) >= 3:
+                        try:
+                            conf = float(parts[2].strip())
+                            conf = max(0.0, min(1.0, conf))
+                        except ValueError:
+                            conf = 0.70
+
                     seg_i, _, speaker, _ = batch[idx]
                     intents.append(UtteranceIntent(
                         segment_id=seg_i,
                         speaker=speaker,
                         intent=CallIntent(intent_str),
-                        confidence=0.80,
+                        confidence=round(conf, 2),
                     ))
                     classified_indices.add(idx)
                 except (ValueError, KeyError):
                     continue
 
-            # Fill any missed utterances with acknowledgment
+            # Fill any missed utterances with "unknown" (not "acknowledgment")
             for idx, (seg_i, _, speaker, _) in enumerate(batch):
                 if idx not in classified_indices:
                     intents.append(UtteranceIntent(
                         segment_id=seg_i,
                         speaker=speaker,
-                        intent=CallIntent.ACKNOWLEDGMENT,
-                        confidence=0.5,
+                        intent=CallIntent.UNKNOWN,
+                        confidence=0.3,
                     ))
 
             total_classified += len(classified_indices)
@@ -690,8 +874,8 @@ def _classify_intents_with_prefilter(segments: list, lang: str = "en") -> list[U
                 intents.append(UtteranceIntent(
                     segment_id=seg_i,
                     speaker=speaker,
-                    intent=CallIntent.ACKNOWLEDGMENT,
-                    confidence=0.3,
+                    intent=CallIntent.UNKNOWN,
+                    confidence=0.1,
                 ))
 
     logger.info(f"Intent classification: {total_classified} classified via LLM in {(len(llm_queue) + LLM_BATCH - 1) // LLM_BATCH} batch(es)")
@@ -754,7 +938,7 @@ def _extract_all_llm_batched(
         result = extract_structured(
             prompt=prompt,
             response_model=CombinedExtraction,
-            model="qwen2.5:3b",
+            model=_get_llm_model(lang),
             system_prompt=(
                 "You are a financial call analyst. Extract entities, obligations, and summary "
                 "in a SINGLE response. The transcript may be in any language. "
@@ -794,12 +978,13 @@ def _extract_entities_llm(segments: list, lang: str = "en") -> list[FinancialEnt
         f"Types: currency_amount, date, account_number, product_name, interest_rate, tenure, penalty\n"
         f"Example: ENTITY|currency_amount|5000|the monthly installment of five thousand\n\n"
         f"Only extract entities that require context to understand (not obvious numbers).\n"
+        f"{_get_few_shot_examples(lang, 'entity')}"
         f"If none found, output: NONE\n\n"
         f"{full_text[:4000]}"
     )
 
     try:
-        raw = extract_raw(prompt, model="qwen2.5:3b", timeout=45)
+        raw = extract_raw(prompt, model=_get_llm_model(lang), timeout=45)
         entities = []
         for line in raw.strip().split("\n"):
             line = line.strip()
@@ -839,7 +1024,7 @@ def _detect_obligations(segments: list, lang: str = "en") -> list[Obligation]:
     )
 
     try:
-        raw = extract_raw(prompt, model="qwen2.5:3b", timeout=45)
+        raw = extract_raw(prompt, model=_get_llm_model(lang), timeout=45)
         obligations = []
         for line in raw.strip().split("\n"):
             line = line.strip()
@@ -876,7 +1061,7 @@ def _generate_summary(segments: list, call_type: str, lang: str = "en") -> tuple
     )
 
     try:
-        raw = extract_raw(prompt, model="qwen2.5:3b", timeout=45)
+        raw = extract_raw(prompt, model=_get_llm_model(lang), timeout=45)
         summary = ""
         outcomes = []
         actions = []
@@ -972,14 +1157,76 @@ def _compress_transcript_for_llm(segments: list, max_chars: int = 6000) -> str:
     return result
 
 
-def _map_speaker_roles(segments: list, call_type: str = "general") -> list:
-    """Map diarization speaker labels (SPEAKER_00/01/02) to agent/customer roles.
+def _auto_detect_call_type(segments: list) -> str:
+    """Auto-detect call type from first ~30s of transcript using keyword signals.
 
-    Heuristics:
-    1. In most call center calls, the AGENT speaks first (opening greeting)
-    2. The agent typically has more talk time in collections/KYC calls
-    3. If only 1 speaker detected, label all as "unknown"
-    4. If 3+ speakers, the primary two get agent/customer, rest are "other"
+    Returns detected call type or 'general' if no strong signal.
+    """
+    # Collect first ~30s of text
+    opening_text = []
+    for seg in segments:
+        if seg.get("start", 0) > 45:  # generous 45s window
+            break
+        opening_text.append(seg.get("text", "").lower())
+    text = " ".join(opening_text)
+
+    if not text or len(text) < 20:
+        return "general"
+
+    # Score each call type by keyword matches
+    type_signals = {
+        "collections": [
+            "overdue", "outstanding", "emi", "payment due", "recovery",
+            "balance due", "default", "pay now", "bakaya", "vasuli", "kist",
+            "installment", "repay", "dues", "delinquent", "late payment",
+            "settlement", "one-time settlement", "ots",
+        ],
+        "kyc": [
+            "kyc", "verification", "verify your", "identity", "aadhaar",
+            "pan card", "date of birth", "confirm your", "mother's maiden",
+            "know your customer", "video kyc", "re-kyc",
+        ],
+        "complaint": [
+            "complaint", "grievance", "not satisfied", "escalate",
+            "supervisor", "manager", "resolve", "dissatisfied",
+            "file a complaint", "lodge a complaint", "unhappy",
+            "shikayat", "problem",
+        ],
+        "consent": [
+            "consent", "authorize", "auto-debit", "nach", "mandate",
+            "standing instruction", "agree to", "permission",
+            "do you agree", "recording consent",
+        ],
+        "onboarding": [
+            "welcome", "new account", "opening", "onboarding",
+            "terms and conditions", "loan application", "approved",
+            "congratulations", "sanction", "disburse",
+        ],
+    }
+
+    scores: dict[str, int] = {}
+    for ctype, keywords in type_signals.items():
+        score = sum(1 for kw in keywords if kw in text)
+        if score >= 2:  # require at least 2 keyword matches
+            scores[ctype] = score
+
+    if not scores:
+        return "general"
+
+    best = max(scores, key=scores.get)
+    logger.debug(f"Call type auto-detection scores: {scores}, selected: {best}")
+    return best
+
+
+def _map_speaker_roles(segments: list, call_type: str = "general") -> list:
+    """Map diarization speaker labels (SPEAKER_00/01/02) to semantic roles.
+
+    For regulated call types (collections, kyc, onboarding, consent, complaint):
+        First speaker → "agent", second → "customer", extras → "other"
+
+    For general/unregulated calls (earnings calls, investor presentations):
+        First speaker → "Speaker A", second → "Speaker B", extras → "Speaker C" etc.
+        (No agent/customer assumption — avoids wrong role labels on non-call-center audio)
     """
     # Collect unique speakers and their stats
     speaker_stats = {}
@@ -998,41 +1245,40 @@ def _map_speaker_roles(segments: list, call_type: str = "general") -> list:
 
     # Sort speakers by first appearance
     speakers_by_appearance = sorted(speaker_stats.keys(), key=lambda s: speaker_stats[s]["first_seen"])
-    # Sort speakers by total duration (descending)
-    speakers_by_duration = sorted(speaker_stats.keys(), key=lambda s: -speaker_stats[s]["total_duration"])
 
-    # Heuristic: First speaker is usually the agent (they initiate the call)
-    # In collections, the agent also usually talks more
-    first_speaker = speakers_by_appearance[0]
-    most_talkative = speakers_by_duration[0]
+    # Regulated call types: assign agent/customer roles
+    regulated_types = {"collections", "kyc", "onboarding", "consent", "complaint"}
+    use_agent_customer = call_type in regulated_types
 
-    if call_type in ("collections", "kyc", "onboarding", "consent"):
-        # Agent usually talks more AND speaks first in structured calls
+    if use_agent_customer:
+        first_speaker = speakers_by_appearance[0]
         agent_speaker = first_speaker
+        customer_speaker = speakers_by_appearance[1] if speakers_by_appearance[1] != agent_speaker else (
+            speakers_by_appearance[0] if len(speakers_by_appearance) > 1 else None
+        )
+
+        role_map = {agent_speaker: "agent"}
+        if customer_speaker:
+            role_map[customer_speaker] = "customer"
+        for sp in speaker_stats:
+            if sp not in role_map:
+                role_map[sp] = "other"
+
+        logger.info(
+            f"Speaker role mapping (regulated): {role_map} "
+            f"(agent={speaker_stats.get(agent_speaker, {}).get('total_duration', 0):.1f}s, "
+            f"customer={speaker_stats.get(customer_speaker, {}).get('total_duration', 0):.1f}s)"
+        )
     else:
-        # For general/complaint calls, first speaker heuristic is strongest
-        agent_speaker = first_speaker
+        # General/unknown calls: neutral labels (Speaker A, B, C...)
+        labels = [f"Speaker {chr(65 + i)}" for i in range(len(speakers_by_appearance))]
+        role_map = dict(zip(speakers_by_appearance, labels))
 
-    # Second most prominent speaker is the customer
-    customer_speaker = speakers_by_appearance[1] if speakers_by_appearance[1] != agent_speaker else (
-        speakers_by_appearance[0] if len(speakers_by_appearance) > 1 else None
-    )
-
-    # Build role mapping
-    role_map = {}
-    role_map[agent_speaker] = "agent"
-    if customer_speaker:
-        role_map[customer_speaker] = "customer"
-    # Additional speakers labeled as "other"
-    for sp in speaker_stats:
-        if sp not in role_map:
-            role_map[sp] = "other"
-
-    logger.info(
-        f"Speaker role mapping: {role_map} "
-        f"(agent={speaker_stats.get(agent_speaker, {}).get('total_duration', 0):.1f}s, "
-        f"customer={speaker_stats.get(customer_speaker, {}).get('total_duration', 0):.1f}s)"
-    )
+        dur_parts = [f"{v}={speaker_stats[k]['total_duration']:.1f}s" for k, v in role_map.items()]
+        logger.info(
+            f"Speaker role mapping (general): {role_map} "
+            f"(durations: {', '.join(dur_parts)})"
+        )
 
     # Apply mapping to segments
     for seg in segments:

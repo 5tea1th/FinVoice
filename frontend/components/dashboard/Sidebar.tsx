@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 
-type View = 'overview' | 'upload' | 'calls' | 'review' | 'settings';
+type View = 'overview' | 'upload' | 'calls' | 'review' | 'exports' | 'settings';
 
 interface SidebarProps {
   activeView: View;
@@ -15,6 +15,7 @@ const NAV_ITEMS: { view: View; icon: string; label: string }[] = [
   { view: 'upload', icon: '\u21E7', label: 'Upload' },
   { view: 'calls', icon: '\u260E', label: 'Calls' },
   { view: 'review', icon: '\u2691', label: 'Review Queue' },
+  { view: 'exports', icon: '\u2913', label: 'Exports' },
   { view: 'settings', icon: '\u2699', label: 'Settings' },
 ];
 

@@ -7,6 +7,7 @@ import UploadView from '@/components/dashboard/UploadView';
 import CallDetail from '@/components/dashboard/CallDetail';
 import ReviewQueue from '@/components/dashboard/ReviewQueue';
 import SettingsView from '@/components/dashboard/SettingsView';
+import ExportsView from '@/components/dashboard/ExportsView';
 import { getCalls, type Call } from '@/lib/api';
 
 const VIEW_TITLES: Record<View, string> = {
@@ -14,6 +15,7 @@ const VIEW_TITLES: Record<View, string> = {
   upload: 'Upload',
   calls: 'Calls',
   review: 'Review Queue',
+  exports: 'Exports',
   settings: 'Settings',
 };
 
@@ -105,6 +107,12 @@ export default function DashboardPage() {
           {activeView === 'review' && (
             <div style={{ animation: 'view-in .3s ease' }}>
               <ReviewQueue />
+            </div>
+          )}
+
+          {activeView === 'exports' && (
+            <div style={{ animation: 'view-in .3s ease' }}>
+              <ExportsView />
             </div>
           )}
 

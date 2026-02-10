@@ -11,12 +11,30 @@ Covers Indian financial regulatory framework:
 - RBI Guidelines on Call Timing (Section 8(c))
 """
 
+import re
+
 from config.schemas import ComplianceCheck, ComplianceViolationType
 from analysis.vocab_loader import (
     get_compliance_keywords,
     get_prohibited_phrases as get_vocab_prohibited_phrases,
     get_end_call_phrases,
 )
+
+# Call types where disclosure checks are mandatory (regulated interactions).
+# For "general" (earnings calls, investor presentations, etc.), disclosure
+# checks are skipped — they produce false positives on non-regulated calls.
+_REGULATED_CALL_TYPES = {"collections", "kyc", "consent", "onboarding", "complaint"}
+
+# Severity multipliers by call type. Collections/KYC violations are legally
+# significant; general call violations are mostly noise.
+_SEVERITY_BY_CALL_TYPE = {
+    "collections": {"critical": "critical", "high": "high", "medium": "medium", "low": "low"},
+    "kyc": {"critical": "critical", "high": "high", "medium": "medium", "low": "low"},
+    "consent": {"critical": "critical", "high": "high", "medium": "medium", "low": "low"},
+    "complaint": {"critical": "high", "high": "medium", "medium": "low", "low": "low"},
+    "onboarding": {"critical": "high", "high": "medium", "medium": "low", "low": "low"},
+    "general": {"critical": "low", "high": "low", "medium": "low", "low": "low"},
+}
 
 
 def _get_disclosures(call_type: str, lang: str = "en") -> list[dict]:
@@ -62,6 +80,27 @@ def _get_prohibited(lang: str = "en") -> dict[str, list[str]]:
     return phrases
 
 
+def _get_agent_opening_text(segments: list, max_seconds: float = 30.0) -> str:
+    """Get agent's opening speech by cumulative talk time, not clock time.
+
+    Collects agent segments until cumulative agent speech reaches max_seconds.
+    This is robust to hold music, IVR menus, or late-start recordings where
+    clock time doesn't reflect actual agent speech.
+    """
+    _agent_labels = {"agent", "speaker_00", "speaker a"}
+    texts = []
+    cumulative = 0.0
+    for seg in segments:
+        if seg.get("speaker", "").lower() not in _agent_labels:
+            continue
+        duration = seg.get("end", 0) - seg.get("start", 0)
+        texts.append(seg.get("text", ""))
+        cumulative += duration
+        if cumulative >= max_seconds:
+            break
+    return " ".join(texts).lower()
+
+
 def run_compliance_checks(
     transcript_segments: list, call_type: str, lang: str = "en"
 ) -> list[ComplianceCheck]:
@@ -76,41 +115,52 @@ def run_compliance_checks(
     - Repeated call harassment patterns
     """
     checks = []
-    disclosures = _get_disclosures(call_type, lang=lang)
+    severity_map = _SEVERITY_BY_CALL_TYPE.get(call_type, _SEVERITY_BY_CALL_TYPE["general"])
 
-    # Agent speech in first 2 minutes
-    agent_opening = " ".join(
-        s.get("text", "")
-        for s in transcript_segments
-        if s.get("speaker", "").lower() in ("agent", "speaker_00")
-        and s.get("start", 0) < 120
-    ).lower()
+    # Skip disclosure checks for non-regulated call types (earnings calls, etc.)
+    if call_type in _REGULATED_CALL_TYPES:
+        disclosures = _get_disclosures(call_type, lang=lang)
 
-    # Check required disclosures
-    for disclosure in disclosures:
-        found = any(kw in agent_opening for kw in disclosure["keywords"])
-        checks.append(ComplianceCheck(
-            check_name=disclosure["check"],
-            passed=found,
-            violation_type=ComplianceViolationType.MISSING_DISCLOSURE if not found else None,
-            evidence_text=agent_opening[:200] if not found else None,
-            regulation=disclosure["regulation"],
-            severity="high" if not found else "low",
-        ))
+        # Agent speech: first 30 seconds of cumulative agent talk time
+        # (robust to hold music, IVR, or late-start recordings)
+        agent_opening = _get_agent_opening_text(transcript_segments, max_seconds=30)
 
-    # Check prohibited phrases across entire call (agent speech only)
-    full_agent_text = " ".join(
-        s.get("text", "")
-        for s in transcript_segments
-        if s.get("speaker", "").lower() in ("agent", "speaker_00")
-    ).lower()
+        # Check required disclosures
+        for disclosure in disclosures:
+            found = any(
+                re.search(rf"\b{re.escape(kw)}\b", agent_opening, re.IGNORECASE)
+                for kw in disclosure["keywords"]
+            )
+            raw_severity = "high" if not found else "low"
+            checks.append(ComplianceCheck(
+                check_name=disclosure["check"],
+                passed=found,
+                violation_type=ComplianceViolationType.MISSING_DISCLOSURE if not found else None,
+                evidence_text=agent_opening[:200] if not found else None,
+                regulation=disclosure["regulation"],
+                severity=severity_map.get(raw_severity, raw_severity),
+            ))
+
+    # Check prohibited phrases across call.
+    # For regulated calls: agent speech only. For general calls: all speech
+    # (speakers are labeled "Speaker A"/"Speaker B", not "agent"/"customer").
+    if call_type in _REGULATED_CALL_TYPES:
+        full_agent_text = " ".join(
+            s.get("text", "")
+            for s in transcript_segments
+            if s.get("speaker", "").lower() in ("agent", "speaker_00")
+        ).lower()
+    else:
+        full_agent_text = " ".join(
+            s.get("text", "") for s in transcript_segments
+        ).lower()
 
     prohibited = _get_prohibited(lang=lang)
     for category, phrases in prohibited.items():
         for phrase in phrases:
-            if phrase.lower() in full_agent_text:
+            if re.search(rf"\b{re.escape(phrase.lower())}\b", full_agent_text, re.IGNORECASE):
                 seg_id = _find_segment_containing(transcript_segments, phrase)
-                severity = "critical" if category in ("threats", "coercion", "misleading") else "high"
+                raw_severity = "critical" if category in ("threats", "coercion", "misleading") else "high"
                 checks.append(ComplianceCheck(
                     check_name=f"prohibited_{category}",
                     passed=False,
@@ -118,7 +168,7 @@ def run_compliance_checks(
                     evidence_text=f'Agent said: "{phrase}"',
                     segment_id=seg_id,
                     regulation="RBI_Fair_Practice_Code",
-                    severity=severity,
+                    severity=severity_map.get(raw_severity, raw_severity),
                 ))
 
     # Check for agent sharing customer info with third parties
@@ -150,7 +200,7 @@ def _check_third_party_disclosure(segments: list) -> list[ComplianceCheck]:
     ]
 
     for phrase in third_party_phrases:
-        if phrase in full_text:
+        if re.search(rf"\b{re.escape(phrase)}\b", full_text, re.IGNORECASE):
             seg_id = _find_segment_containing(segments, phrase)
             checks.append(ComplianceCheck(
                 check_name="third_party_disclosure",
@@ -178,8 +228,10 @@ def _check_call_conduct(segments: list, call_type: str, lang: str = "en") -> lis
 
     # Check for agent domination in collections (shouldn't be >70% talk time)
     if call_type == "collections":
-        agent_segs = [s for s in segments if s.get("speaker", "").lower() in ("agent", "speaker_00")]
-        customer_segs = [s for s in segments if s.get("speaker", "").lower() in ("customer", "speaker_01")]
+        _agent_labels = {"agent", "speaker_00", "speaker a"}
+        _customer_labels = {"customer", "speaker_01", "speaker b"}
+        agent_segs = [s for s in segments if s.get("speaker", "").lower() in _agent_labels]
+        customer_segs = [s for s in segments if s.get("speaker", "").lower() in _customer_labels]
 
         agent_duration = sum(s.get("end", 0) - s.get("start", 0) for s in agent_segs)
         customer_duration = sum(s.get("end", 0) - s.get("start", 0) for s in customer_segs)
@@ -201,14 +253,17 @@ def _check_call_conduct(segments: list, call_type: str, lang: str = "en") -> lis
     if lang != "en":
         end_call_vocab = list(set(end_call_vocab + get_end_call_phrases("en")))
     end_call_phrases = end_call_vocab if end_call_vocab else []
+    # Match customer speech — handles both regulated labels (customer/speaker_01)
+    # and general labels (Speaker B, etc.)
+    _customer_labels = {"customer", "speaker_01", "speaker b"}
     full_customer_text = " ".join(
         s.get("text", "")
         for s in segments
-        if s.get("speaker", "").lower() in ("customer", "speaker_01")
+        if s.get("speaker", "").lower() in _customer_labels
     ).lower()
 
     for phrase in end_call_phrases:
-        if phrase in full_customer_text:
+        if re.search(rf"\b{re.escape(phrase)}\b", full_customer_text, re.IGNORECASE):
             # Check if agent continued speaking significantly after this
             phrase_seg_id = _find_segment_containing(segments, phrase)
             if phrase_seg_id is not None:

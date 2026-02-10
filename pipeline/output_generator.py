@@ -204,6 +204,139 @@ def export_training_pairs_jsonl(call_records: list, output_path: str) -> str:
     return output_path
 
 
+def export_sentiment_pairs_jsonl(call_records: list, output_path: str) -> str:
+    """Export (text, sentiment) pairs for sentiment classifier training.
+
+    Each line: {"text": "utterance", "label": "positive/negative/neutral",
+                "score": 0.85, "speaker": "agent", "lang": "en"}
+    """
+    Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+
+    pairs = []
+    for record in call_records:
+        r = _to_dict(record)
+        segments = r.get("transcript_segments", [])
+        lang = r.get("detected_language", r.get("language", "en"))
+        cust_traj = r.get("customer_sentiment_trajectory", [])
+        agent_traj = r.get("agent_sentiment_trajectory", [])
+
+        for seg in segments:
+            text = seg.get("text", "").strip()
+            if not text or len(text) < 5:
+                continue
+
+            seg_id = seg.get("id", 0)
+            speaker = seg.get("speaker", "unknown").lower()
+
+            # Find sentiment score for this segment
+            score = None
+            if "agent" in speaker or "speaker a" in speaker:
+                if seg_id < len(agent_traj):
+                    score = agent_traj[seg_id]
+            else:
+                if seg_id < len(cust_traj):
+                    score = cust_traj[seg_id]
+
+            if score is None or score == 0:
+                continue
+
+            # Map score to label
+            if score > 0.15:
+                label = "positive"
+            elif score < -0.15:
+                label = "negative"
+            else:
+                label = "neutral"
+
+            pairs.append({
+                "text": text,
+                "label": label,
+                "score": round(score, 4),
+                "speaker": speaker,
+                "lang": seg.get("lang", lang),
+                "call_id": r.get("call_id"),
+            })
+
+    with open(output_path, "w") as f:
+        for pair in pairs:
+            f.write(json.dumps(pair) + "\n")
+
+    logger.info(f"Sentiment training pairs: {output_path} ({len(pairs)} pairs)")
+    return output_path
+
+
+def export_entity_pairs_jsonl(call_records: list, output_path: str) -> str:
+    """Export (text, entity_annotations) pairs for NER training.
+
+    Each line: {"text": "segment text", "entities": [{"type": "currency_amount",
+                "value": "5000", "start": 10, "end": 25}], "lang": "en"}
+    """
+    Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+
+    pairs = []
+    for record in call_records:
+        r = _to_dict(record)
+        segments = r.get("transcript_segments", [])
+        lang = r.get("detected_language", r.get("language", "en"))
+        entities = r.get("financial_entities", [])
+        pii_entities = r.get("pii_entities", [])
+
+        # Group entities by segment_id
+        seg_entities: dict[int, list] = {}
+        for e in entities:
+            sid = e.get("segment_id", -1)
+            if sid >= 0:
+                seg_entities.setdefault(sid, []).append({
+                    "type": e.get("entity_type"),
+                    "value": e.get("normalized_value", e.get("value")),
+                    "raw_text": e.get("raw_text", ""),
+                })
+        for p in pii_entities:
+            sid = p.get("segment_id", -1)
+            if sid >= 0:
+                seg_entities.setdefault(sid, []).append({
+                    "type": p.get("entity_type"),
+                    "value": p.get("text", ""),
+                    "raw_text": p.get("text", ""),
+                })
+
+        for seg_id, ents in seg_entities.items():
+            if seg_id < len(segments):
+                text = segments[seg_id].get("text", "").strip()
+                if text:
+                    # Find entity positions in text
+                    annotated = []
+                    for ent in ents:
+                        raw = ent.get("raw_text", "")
+                        if raw and raw in text:
+                            start = text.index(raw)
+                            annotated.append({
+                                "type": ent["type"],
+                                "value": ent.get("value", ""),
+                                "start": start,
+                                "end": start + len(raw),
+                            })
+                        else:
+                            annotated.append({
+                                "type": ent["type"],
+                                "value": ent.get("value", ""),
+                            })
+
+                    pairs.append({
+                        "text": text,
+                        "entities": annotated,
+                        "lang": segments[seg_id].get("lang", lang),
+                        "call_id": r.get("call_id"),
+                    })
+
+    with open(output_path, "w") as f:
+        for pair in pairs:
+            f.write(json.dumps(pair) + "\n")
+
+    logger.info(f"Entity training pairs: {output_path} ({len(pairs)} pairs)")
+    return output_path
+
+
 def export_all(call_records: list, output_dir: str = "data/exports") -> dict:
     """Export all formats at once.
 
@@ -242,10 +375,20 @@ def export_all(call_records: list, output_dir: str = "data/exports") -> dict:
     if path:
         outputs["jsonl"] = path
 
-    # Training pairs
-    path = export_training_pairs_jsonl(call_records, f"{output_dir}/training_pairs.jsonl")
+    # Training pairs (intents)
+    path = export_training_pairs_jsonl(call_records, f"{output_dir}/training_intents.jsonl")
     if path:
-        outputs["training_pairs"] = path
+        outputs["training_intents"] = path
+
+    # Training pairs (sentiment)
+    path = export_sentiment_pairs_jsonl(call_records, f"{output_dir}/training_sentiment.jsonl")
+    if path:
+        outputs["training_sentiment"] = path
+
+    # Training pairs (entities/NER)
+    path = export_entity_pairs_jsonl(call_records, f"{output_dir}/training_entities.jsonl")
+    if path:
+        outputs["training_entities"] = path
 
     logger.info(f"All exports complete: {len(outputs)} files in {output_dir}/")
     return outputs
@@ -279,6 +422,7 @@ def _flatten_record(r: dict) -> dict:
         "audio_file": Path(r.get("audio_file", "")).name,
         "duration_sec": r.get("duration_seconds"),
         "language": r.get("detected_language", r.get("language")),
+        "has_code_switching": r.get("has_code_switching", False),
         "call_type": r.get("call_type"),
         "audio_quality_score": r.get("audio_quality_score"),
         "audio_quality_flag": r.get("audio_quality_flag"),

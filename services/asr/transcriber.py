@@ -1,8 +1,19 @@
-"""Stage 3: Financial Transcription — WhisperX with VRAM-aware loading/unloading."""
+"""Stage 3: Financial Transcription — WhisperX with persistent GPU caching.
+
+GPU lifecycle:
+  Idle:         WhisperX loaded (~3GB), ready for instant transcription
+  Call arrives:  Transcribe immediately (no load delay!)
+  After transcr: Unload WhisperX → emotion2vec → Qwen 2.5:3b
+  After LLM:    Reload WhisperX → back to idle, ready for next call
+
+First load takes ~130s (model + pyannote VAD from disk). Subsequent reloads
+take ~15-20s (weights cached in system RAM by the OS page cache).
+"""
 
 import re
 import json
 import torch
+import threading
 from pathlib import Path
 from loguru import logger
 
@@ -13,10 +24,85 @@ from loguru import logger
 # we patch torch.load to treat None as False.
 _original_torch_load = torch.load
 def _patched_torch_load(*args, **kwargs):
-    if kwargs.get("weights_only") is None:
-        kwargs["weights_only"] = False
+    # Force weights_only=False for all checkpoint loads.
+    # lightning_fabric passes weights_only=True explicitly, and PyTorch 2.8
+    # treats None as True — both break pyannote/speechbrain/FunASR checkpoints
+    # that contain omegaconf objects not in the safe list.
+    kwargs["weights_only"] = False
     return _original_torch_load(*args, **kwargs)
 torch.load = _patched_torch_load
+
+# Patch 2: load_state_dict() silently drops weights when model uses meta tensors
+# PyTorch 2.8 + speechbrain creates models on "meta" device for lazy init.
+# Without assign=True, LSTM weights become no-ops → Silero VAD broken → 0 segments.
+_original_load_state_dict = torch.nn.Module.load_state_dict
+def _patched_load_state_dict(self, state_dict, *args, **kwargs):
+    kwargs.setdefault("assign", True)
+    return _original_load_state_dict(self, state_dict, *args, **kwargs)
+torch.nn.Module.load_state_dict = _patched_load_state_dict
+
+
+# ── Persistent WhisperX model cache ──
+_whisperx_model = None
+_whisperx_lock = threading.Lock()
+
+
+def preload_whisperx():
+    """Load WhisperX into GPU and keep it resident for instant transcription.
+
+    Call this at server startup. First load ~130s, but then the model stays
+    in VRAM ready for immediate use. Thread-safe.
+    """
+    global _whisperx_model
+    with _whisperx_lock:
+        if _whisperx_model is not None:
+            logger.info("WhisperX already loaded — skipping preload")
+            return
+        import whisperx
+        logger.info("Preloading WhisperX (large-v3-turbo, INT8) — first load ~130s...")
+        _whisperx_model = whisperx.load_model(
+            whisper_arch="large-v3-turbo", device="cuda", compute_type="int8",
+        )
+        vram_mb = torch.cuda.memory_allocated() / 1024**2
+        logger.info(f"WhisperX preloaded and resident ({vram_mb:.0f} MB VRAM)")
+
+
+def unload_whisperx():
+    """Unload WhisperX from GPU to free VRAM for other models."""
+    global _whisperx_model
+    with _whisperx_lock:
+        if _whisperx_model is None:
+            return
+        del _whisperx_model
+        _whisperx_model = None
+        torch.cuda.empty_cache()
+        vram_mb = torch.cuda.memory_allocated() / 1024**2
+        logger.info(f"WhisperX unloaded ({vram_mb:.0f} MB VRAM remaining)")
+
+
+def reload_whisperx():
+    """Reload WhisperX after other GPU models are done.
+
+    Faster than first load (~15-20s) because model weights are still
+    in OS page cache from the previous load.
+    """
+    global _whisperx_model
+    with _whisperx_lock:
+        if _whisperx_model is not None:
+            logger.info("WhisperX already loaded — skipping reload")
+            return
+        import whisperx
+        logger.info("Reloading WhisperX into GPU (fast — OS page cache)...")
+        _whisperx_model = whisperx.load_model(
+            whisper_arch="large-v3-turbo", device="cuda", compute_type="int8",
+        )
+        vram_mb = torch.cuda.memory_allocated() / 1024**2
+        logger.info(f"WhisperX reloaded ({vram_mb:.0f} MB VRAM)")
+
+
+def is_whisperx_loaded() -> bool:
+    """Check if WhisperX is currently loaded in GPU."""
+    return _whisperx_model is not None
 
 
 # Financial term correction dictionary — data-driven, not guessed.
@@ -63,8 +149,8 @@ def transcribe_audio(
 ) -> dict:
     """Transcribe audio with WhisperX, apply financial corrections, flag low confidence.
 
-    IMPORTANT: This function loads WhisperX onto GPU (~3GB), transcribes, then
-    explicitly frees VRAM. On 6GB cards, nothing else can use GPU while this runs.
+    Uses the persistent cached model if available (preloaded at server startup).
+    Falls back to loading a fresh model if cache is empty.
 
     Args:
         wav_path: Path to normalized 16kHz mono WAV
@@ -75,19 +161,24 @@ def transcribe_audio(
     Returns:
         dict with segments, low_confidence_segments, overall_confidence, language
     """
+    global _whisperx_model
     import whisperx
 
-    # Meta tensor patch is applied globally in app.py at process startup
-
-    logger.info(f"Loading WhisperX (large-v3-turbo, INT8) — expect ~3GB VRAM")
-    load_kwargs = {
-        "whisper_arch": "large-v3-turbo",
-        "device": "cuda",
-        "compute_type": "int8",
-    }
-    if language:
-        load_kwargs["language"] = language
-    model = whisperx.load_model(**load_kwargs)
+    # Use persistent cached model if available, otherwise load fresh
+    if _whisperx_model is not None:
+        model = _whisperx_model
+        logger.info("Using cached WhisperX model (instant)")
+    else:
+        logger.info("Loading WhisperX (large-v3-turbo, INT8) — no cached model")
+        load_kwargs = {
+            "whisper_arch": "large-v3-turbo",
+            "device": "cuda",
+            "compute_type": "int8",
+        }
+        if language:
+            load_kwargs["language"] = language
+        model = whisperx.load_model(**load_kwargs)
+        _whisperx_model = model
 
     # NOTE: Do NOT restore Module.to yet — alignment and diarization also load
     # models that hit the same meta tensor issue. Restored after all GPU work.
@@ -99,6 +190,27 @@ def transcribe_audio(
     # Capture detected language
     detected_language = result.get("language", language or "en")
     logger.info(f"Transcribed {len(result['segments'])} segments (language={detected_language})")
+
+    # Retry with Hindi if Whisper produced only "foreign" tokens or nothing —
+    # this happens when Whisper mis-detects Hindi/code-switched audio as English
+    if not language:  # only retry if language wasn't explicitly set
+        seg_texts = [s.get("text", "").strip().lower() for s in result.get("segments", [])]
+        all_foreign = all(t in ("foreign", "") for t in seg_texts) if seg_texts else False
+        no_segments = len(result.get("segments", [])) == 0
+        if all_foreign or no_segments:
+            logger.warning("All segments are 'foreign' — retrying with language='hi'")
+            # Need a language-specific model for Hindi — unload cached, load fresh
+            unload_whisperx()
+            model = whisperx.load_model(
+                whisper_arch="large-v3-turbo", device="cuda",
+                compute_type="int8", language="hi",
+            )
+            result = model.transcribe(audio, batch_size=batch_size)
+            detected_language = "hi"
+            # Don't cache the Hindi model — it's language-specific
+            del model
+            torch.cuda.empty_cache()
+            logger.info(f"Hindi retry: {len(result['segments'])} segments")
 
     # P2 FIX: Save per-segment confidence from avg_logprob BEFORE alignment
     # (alignment and diarization may discard word-level scores)
@@ -145,13 +257,9 @@ def transcribe_audio(
     else:
         logger.warning("No HF token — skipping diarization")
 
-    # FREE VRAM — critical for 6GB cards
-    del model
-    torch.cuda.empty_cache()
-    logger.info(
-        f"WhisperX unloaded. VRAM freed: "
-        f"{torch.cuda.memory_allocated() / 1024**2:.0f} MB allocated"
-    )
+    # NOTE: WhisperX model is NOT unloaded here — it stays in GPU cache.
+    # The orchestrator calls unload_whisperx() when it needs VRAM for
+    # emotion2vec / Ollama, then reload_whisperx() after the pipeline finishes.
 
     # Apply financial term corrections
     corrections = load_correction_dictionary()
@@ -276,21 +384,30 @@ def _words_to_segment(words: list, speaker: str, original_seg: dict) -> dict:
 
 
 def _apply_corrections(segments: list, corrections: dict) -> list:
-    """Apply financial term corrections to transcript segments."""
+    """Apply financial term corrections to transcript segments.
+
+    Term corrections (EMI, KYC, CIBIL, etc.) fix actual ASR errors and are applied
+    to the text. Amount normalization ("20 thousand" → 20000) and currency symbols
+    ("rupees" → "₹") are stored as metadata instead of overwriting the transcript,
+    preserving readability. Entity extraction captures these separately.
+    """
     for seg in segments:
         text = seg.get("text", "")
         original = text
 
-        # Term corrections (case-insensitive)
+        # Term corrections only (case-insensitive) — fixes ASR errors
         for wrong, right in corrections.items():
             text = re.sub(rf"\b{re.escape(wrong)}\b", right, text, flags=re.IGNORECASE)
 
-        # Amount normalization
+        # Extract normalized amounts as metadata (don't replace in text)
+        amounts = []
         for pattern, replacement in AMOUNT_PATTERNS:
-            text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
-
-        # Currency symbol normalization
-        text = re.sub(r"\b(rupees?|rs\.?)\b", "₹", text, flags=re.IGNORECASE)
+            for match in re.finditer(pattern, text, flags=re.IGNORECASE):
+                raw = match.group(0)
+                value = int(replacement(match))
+                amounts.append({"raw": raw, "value": value})
+        if amounts:
+            seg["normalized_amounts"] = amounts
 
         seg["text"] = text
         if text != original:

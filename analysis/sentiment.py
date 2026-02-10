@@ -175,15 +175,15 @@ def analyze_sentiment_batch(texts: list[str], lang: str = "en") -> list[dict]:
 
 
 def _is_agent_speaker(speaker: str) -> bool:
-    """Check if speaker label indicates an agent."""
+    """Check if speaker label indicates an agent (or primary speaker in general calls)."""
     s = speaker.lower()
-    return s in ("agent", "speaker_00", "speaker 0", "spk_0")
+    return s in ("agent", "speaker_00", "speaker 0", "spk_0", "speaker a")
 
 
 def _is_customer_speaker(speaker: str) -> bool:
-    """Check if speaker label indicates a customer."""
+    """Check if speaker label indicates a customer (or secondary speaker in general calls)."""
     s = speaker.lower()
-    return s in ("customer", "speaker_01", "speaker 1", "spk_1")
+    return s in ("customer", "speaker_01", "speaker 1", "spk_1", "speaker b")
 
 
 def compute_sentiment_trajectories(segments: list, lang: str = "en") -> tuple[list[float], list[float]]:
@@ -300,6 +300,75 @@ def get_dominant_emotion(customer_trajectories: list[float]) -> str:
         return "frustrated"
     else:
         return "neutral"
+
+
+def interpret_sentiment_context(
+    customer_trajectory: list[float],
+    agent_trajectory: list[float],
+    call_type: str,
+) -> dict:
+    """Interpret sentiment trajectories based on call type.
+
+    Distinguishes financial-negative (informational, e.g. "adverse court rulings")
+    from emotional-negative (actionable, e.g. customer frustration in collections).
+
+    Returns:
+        {
+            "customer_sentiment_type": "financial_negative" | "emotional_negative" | "positive" | "neutral",
+            "agent_sentiment_type": same,
+            "actionable": bool (True if sentiment warrants human attention),
+            "escalation_risk": "low" | "medium" | "high",
+        }
+    """
+    cust_avg = sum(customer_trajectory) / max(len(customer_trajectory), 1)
+    agent_avg = sum(agent_trajectory) / max(len(agent_trajectory), 1)
+
+    # For general/earnings calls, negative sentiment is informational (financial discussion)
+    # For collections/complaint, negative customer sentiment is emotional and actionable
+    emotional_call_types = {"collections", "complaint", "kyc", "consent"}
+    is_emotional_context = call_type in emotional_call_types
+
+    def classify_type(avg: float, is_customer: bool) -> str:
+        if avg > 0.2:
+            return "positive"
+        elif avg > -0.2:
+            return "neutral"
+        elif is_emotional_context and is_customer:
+            return "emotional_negative"
+        else:
+            return "financial_negative"
+
+    cust_type = classify_type(cust_avg, is_customer=True)
+    agent_type = classify_type(agent_avg, is_customer=False)
+
+    # Actionable: customer is emotionally negative, or agent is negative in any context
+    actionable = cust_type == "emotional_negative" or (
+        agent_type in ("emotional_negative", "financial_negative") and agent_avg < -0.4
+    )
+
+    # Escalation risk from trajectory trend (getting worse over time)
+    if len(customer_trajectory) >= 4:
+        first_half = customer_trajectory[:len(customer_trajectory) // 2]
+        second_half = customer_trajectory[len(customer_trajectory) // 2:]
+        first_avg = sum(first_half) / len(first_half)
+        second_avg = sum(second_half) / len(second_half)
+        trend = second_avg - first_avg  # negative = getting worse
+
+        if trend < -0.3 and second_avg < -0.3:
+            escalation_risk = "high"
+        elif trend < -0.15:
+            escalation_risk = "medium"
+        else:
+            escalation_risk = "low"
+    else:
+        escalation_risk = "medium" if cust_avg < -0.4 else "low"
+
+    return {
+        "customer_sentiment_type": cust_type,
+        "agent_sentiment_type": agent_type,
+        "actionable": actionable,
+        "escalation_risk": escalation_risk,
+    }
 
 
 # ── FinBERT Intent Classification (when fine-tuned model is available) ──

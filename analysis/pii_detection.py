@@ -271,6 +271,13 @@ def detect_pii(segments: list, score_threshold: float = 0.5, lang: str = "en") -
         "IN_IFSC", "IN_BANK_ACCOUNT",
     ]
 
+    # Per-entity-type score thresholds. DATE_TIME is raised to 0.7 because
+    # Presidio's default recognizer is too aggressive on financial calls —
+    # catches "2020", "third quarter", "last year" etc. as PII dates.
+    entity_score_overrides = {
+        "DATE_TIME": max(score_threshold, 0.7),
+    }
+
     for seg_idx, seg in enumerate(segments):
         text = seg.get("text", "")
         if not text.strip():
@@ -284,6 +291,11 @@ def detect_pii(segments: list, score_threshold: float = 0.5, lang: str = "en") -
         )
 
         for r in results:
+            # Apply per-entity-type score threshold
+            min_score = entity_score_overrides.get(r.entity_type, score_threshold)
+            if r.score < min_score:
+                continue
+
             detected_text = text[r.start:r.end]
 
             # Validate Aadhaar with Verhoeff if detected
@@ -301,6 +313,12 @@ def detect_pii(segments: list, score_threshold: float = 0.5, lang: str = "en") -
                 score=round(r.score, 3),
                 segment_id=seg_idx,
             ))
+
+    # For non-English: supplement with multilingual NER for PERSON/LOCATION
+    # Presidio's spaCy NER is English-only — Hindi/Tamil names go undetected.
+    if lang != "en":
+        multilingual_pii = _detect_multilingual_ner(segments, lang)
+        pii_entities.extend(multilingual_pii)
 
     # Deduplicate by (entity_type, text, segment_id)
     seen = set()
@@ -375,3 +393,117 @@ def _mask_pii(text: str, entity_type: str) -> str:
         return "[LOCATION]"
     else:
         return f"[{entity_type}]"
+
+
+# ── MULTILINGUAL NER (Hindi/Tamil PERSON + LOCATION) ──
+
+_multilingual_ner = None
+
+
+def _get_multilingual_ner():
+    """Load multilingual NER pipeline for Hindi/Tamil names and locations.
+
+    Uses XLM-RoBERTa-based NER (ai4bharat/IndicNER or xlm-roberta-large-finetuned-conll03).
+    Falls back gracefully if not available.
+    """
+    global _multilingual_ner
+    if _multilingual_ner is not None:
+        return _multilingual_ner
+
+    try:
+        from transformers import pipeline as hf_pipeline
+
+        # Try AI4Bharat IndicNER first (best for Indian languages)
+        try:
+            _multilingual_ner = hf_pipeline(
+                "token-classification",
+                model="ai4bharat/IndicNER",
+                device=-1,
+                aggregation_strategy="simple",
+                truncation=True,
+                max_length=512,
+            )
+            logger.info("IndicNER loaded for Hindi/Tamil PII (PERSON/LOCATION)")
+            return _multilingual_ner
+        except Exception:
+            pass
+
+        # Fallback: XLM-R multilingual NER
+        _multilingual_ner = hf_pipeline(
+            "token-classification",
+            model="Davlan/xlm-roberta-large-finetuned-conll03-english",
+            device=-1,
+            aggregation_strategy="simple",
+            truncation=True,
+            max_length=512,
+        )
+        logger.info("XLM-R NER loaded as fallback for multilingual PII")
+        return _multilingual_ner
+
+    except Exception as e:
+        logger.warning(f"Multilingual NER not available for PII: {e}")
+        _multilingual_ner = False  # Sentinel to avoid retrying
+        return None
+
+
+def _detect_multilingual_ner(segments: list, lang: str) -> list[PIIEntity]:
+    """Run multilingual NER to detect PERSON and LOCATION in non-English text.
+
+    Presidio's spaCy NER is English-only. This supplements it for Hindi/Tamil
+    names and locations using IndicNER or XLM-R.
+    """
+    ner = _get_multilingual_ner()
+    if not ner:
+        return []
+
+    entities = []
+    # NER label mapping (different models use different labels)
+    person_labels = {"PER", "PERSON", "B-PER", "I-PER"}
+    location_labels = {"LOC", "LOCATION", "B-LOC", "I-LOC", "GPE"}
+
+    for seg_idx, seg in enumerate(segments):
+        text = seg.get("text", "").strip()
+        if not text or len(text) < 3:
+            continue
+
+        try:
+            results = ner(text[:512])
+            for ent in results:
+                label = ent.get("entity_group", ent.get("entity", "")).upper()
+                score = ent.get("score", 0.0)
+                word = ent.get("word", "").strip()
+
+                if score < 0.5 or len(word) < 2:
+                    continue
+
+                if label in person_labels or "PER" in label:
+                    entity_type = "PERSON"
+                elif label in location_labels or "LOC" in label:
+                    entity_type = "LOCATION"
+                else:
+                    continue
+
+                # Clean up tokenizer artifacts (## prefixes, spaces)
+                word = word.replace("##", "").strip()
+                if not word:
+                    continue
+
+                start = ent.get("start", 0)
+                end = ent.get("end", start + len(word))
+
+                entities.append(PIIEntity(
+                    entity_type=entity_type,
+                    text=word,
+                    masked_text=_mask_pii(word, entity_type),
+                    start=start,
+                    end=end,
+                    score=round(score, 3),
+                    segment_id=seg_idx,
+                ))
+        except Exception:
+            continue
+
+    if entities:
+        logger.info(f"Multilingual NER ({lang}): {len(entities)} PERSON/LOCATION entities")
+
+    return entities

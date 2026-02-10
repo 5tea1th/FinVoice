@@ -13,8 +13,11 @@ import torch
 # pyannote/speechbrain/FunASR checkpoints need weights_only=False
 _original_torch_load = torch.load
 def _patched_torch_load(*args, **kwargs):
-    if kwargs.get("weights_only") is None:
-        kwargs["weights_only"] = False
+    # Force weights_only=False for all checkpoint loads.
+    # lightning_fabric passes weights_only=True explicitly, and PyTorch 2.8
+    # treats None as True — both break pyannote/speechbrain/FunASR checkpoints
+    # that contain omegaconf objects not in the safe list.
+    kwargs["weights_only"] = False
     return _original_torch_load(*args, **kwargs)
 torch.load = _patched_torch_load
 
@@ -30,6 +33,16 @@ def _safe_module_to(self, *args, **kwargs):
         return self.to_empty(device=device)
 torch.nn.Module.to = _safe_module_to
 
+# Patch 3: load_state_dict() silently drops weights when model uses meta tensors
+# PyTorch 2.8 with accelerate/speechbrain creates models on "meta" device for lazy init.
+# Without assign=True, load_state_dict copies real weights into meta placeholders → no-op.
+# This causes Silero VAD LSTM weights to remain uninitialized → WhisperX produces 0 segments.
+_original_load_state_dict = torch.nn.Module.load_state_dict
+def _patched_load_state_dict(self, state_dict, *args, **kwargs):
+    kwargs.setdefault("assign", True)
+    return _original_load_state_dict(self, state_dict, *args, **kwargs)
+torch.nn.Module.load_state_dict = _patched_load_state_dict
+
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -40,6 +53,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from loguru import logger
 
 from services.llm.client import check_ollama_health
+from services.asr.transcriber import preload_whisperx, is_whisperx_loaded
 from pipeline.orchestrator import process_call
 from services.backboard.client import (
     is_configured as backboard_configured,
@@ -65,6 +79,19 @@ app.add_middleware(
 )
 
 
+# ── Startup: preload WhisperX into GPU for instant transcription ──
+@app.on_event("startup")
+async def startup_preload():
+    """Load WhisperX at server start so first call transcribes instantly."""
+    def _preload():
+        try:
+            preload_whisperx()
+        except Exception as e:
+            logger.warning(f"WhisperX preload failed (will load on first call): {e}")
+    # Run in background thread so server starts responding immediately
+    threading.Thread(target=_preload, daemon=True).start()
+
+
 @app.get("/api/health")
 async def health():
     """Health check — GPU status, Ollama status, system info."""
@@ -84,6 +111,7 @@ async def health():
         "status": "healthy",
         "gpu": gpu_info,
         "ollama": ollama,
+        "whisperx_loaded": is_whisperx_loaded(),
     }
 
 
@@ -242,6 +270,9 @@ async def get_transcript(call_id: str):
     with open(result_path) as f:
         data = json.load(f)
 
+    masked = False
+    # Check for masked=true query param (FastAPI auto-parses it from the request)
+    # We handle it inline since the endpoint already exists
     return {
         "call_id": call_id,
         "language": data.get("detected_language", data.get("language")),
@@ -249,6 +280,68 @@ async def get_transcript(call_id: str):
         "overall_confidence": data.get("overall_transcript_confidence"),
         "segments": data.get("transcript_segments", []),
     }
+
+
+@app.get("/api/calls/{call_id}/transcript/masked")
+async def get_masked_transcript(call_id: str):
+    """Get PII-masked transcript for a call."""
+    result_path = Path(f"data/processed/{call_id}_record.json")
+    if not result_path.exists():
+        raise HTTPException(status_code=404, detail=f"Call {call_id} not found")
+
+    with open(result_path) as f:
+        data = json.load(f)
+
+    segments = data.get("transcript_segments", [])
+    pii_entities = data.get("pii_entities", [])
+
+    # Build PII mask map: segment_id → list of (text, masked_text) replacements
+    mask_map: dict[int, list[tuple[str, str]]] = {}
+    for pii in pii_entities:
+        seg_id = pii.get("segment_id")
+        if seg_id is not None:
+            if seg_id not in mask_map:
+                mask_map[seg_id] = []
+            original = pii.get("text", "")
+            masked = pii.get("masked_text", f"[{pii.get('entity_type', 'PII')}]")
+            if original:
+                mask_map[seg_id].append((original, masked))
+
+    # Apply masks to segments
+    masked_segments = []
+    for seg in segments:
+        seg_copy = dict(seg)
+        seg_id = seg.get("id", seg.get("segment_id"))
+        text = seg_copy.get("text", "")
+        if seg_id in mask_map:
+            for original, masked_text in mask_map[seg_id]:
+                text = text.replace(original, masked_text)
+        seg_copy["text"] = text
+        masked_segments.append(seg_copy)
+
+    return {
+        "call_id": call_id,
+        "masked": True,
+        "pii_count": len(pii_entities),
+        "segments": masked_segments,
+    }
+
+
+@app.get("/api/calls/{call_id}/download")
+async def download_call(call_id: str):
+    """Download the full analysis JSON for a single call."""
+    result_path = Path(f"data/processed/{call_id}_record.json")
+    if not result_path.exists():
+        # Also check batch_results
+        result_path = Path(f"data/processed/batch_results/{call_id}_record.json")
+        if not result_path.exists():
+            raise HTTPException(status_code=404, detail=f"Call {call_id} not found")
+
+    return FileResponse(
+        str(result_path),
+        media_type="application/json",
+        filename=f"{call_id}_analysis.json",
+    )
 
 
 @app.get("/api/calls/{call_id}/entities")
@@ -408,14 +501,16 @@ async def get_stats():
 
 @app.get("/api/export/{format}")
 async def export_data(format: str = "csv"):
-    """Export all processed call data in specified format.
+    """Export all processed call data in specified format as a downloadable file.
 
-    Supported formats: csv, parquet, jsonl
-    Returns download path.
+    Supported formats: csv, parquet, jsonl, training_intents, training_sentiment,
+    training_entities, all (returns JSON manifest).
     """
     from pipeline.output_generator import (
         load_records_from_dir, export_to_csv, export_to_parquet,
-        export_to_jsonl, export_all,
+        export_to_jsonl, export_training_pairs_jsonl,
+        export_sentiment_pairs_jsonl, export_entity_pairs_jsonl,
+        export_all,
     )
 
     records = load_records_from_dir("data/processed")
@@ -425,19 +520,51 @@ async def export_data(format: str = "csv"):
     output_dir = "data/exports"
     Path(output_dir).mkdir(parents=True, exist_ok=True)
 
+    media_types = {
+        "csv": "text/csv",
+        "parquet": "application/octet-stream",
+        "jsonl": "application/jsonlines",
+        "training_intents": "application/jsonlines",
+        "training_sentiment": "application/jsonlines",
+        "training_entities": "application/jsonlines",
+    }
+
     if format == "csv":
         path = export_to_csv(records, f"{output_dir}/call_summary.csv")
+        filename = "call_summary.csv"
     elif format == "parquet":
         path = export_to_parquet(records, f"{output_dir}/calls.parquet")
+        filename = "calls.parquet"
     elif format == "jsonl":
         path = export_to_jsonl(records, f"{output_dir}/calls.jsonl")
+        filename = "calls.jsonl"
+    elif format == "training_intents":
+        path = export_training_pairs_jsonl(records, f"{output_dir}/training_intents.jsonl")
+        filename = "training_intents.jsonl"
+    elif format == "training_sentiment":
+        path = export_sentiment_pairs_jsonl(records, f"{output_dir}/training_sentiment.jsonl")
+        filename = "training_sentiment.jsonl"
+    elif format == "training_entities":
+        path = export_entity_pairs_jsonl(records, f"{output_dir}/training_entities.jsonl")
+        filename = "training_entities.jsonl"
     elif format == "all":
         outputs = export_all(records, output_dir)
         return {"status": "exported", "files": outputs, "total_calls": len(records)}
     else:
-        raise HTTPException(status_code=400, detail=f"Unsupported format: {format}. Use csv, parquet, jsonl, or all")
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported format: {format}. Use csv, parquet, jsonl, "
+                   f"training_intents, training_sentiment, training_entities, or all"
+        )
 
-    return {"status": "exported", "path": path, "total_calls": len(records)}
+    if not path or not Path(path).exists():
+        raise HTTPException(status_code=500, detail="Export generation failed")
+
+    return FileResponse(
+        path,
+        media_type=media_types.get(format, "application/octet-stream"),
+        filename=filename,
+    )
 
 
 @app.get("/api/calls/{call_id}/intents")

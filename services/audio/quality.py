@@ -3,7 +3,37 @@
 import numpy as np
 import soundfile as sf
 import opensmile
+import torch
 from loguru import logger
+
+
+# Silero VAD model (lazy-loaded, cached for reuse across calls)
+_silero_model = None
+_silero_get_speech_ts = None
+
+
+def _get_silero_vad():
+    """Load Silero VAD model (cached after first call)."""
+    global _silero_model, _silero_get_speech_ts
+    if _silero_model is None:
+        # Use local cache if available (avoids network + redownload)
+        import os
+        cache_dir = os.path.expanduser("~/.cache/torch/hub/snakers4_silero-vad_master")
+        if os.path.isdir(cache_dir):
+            _silero_model, utils = torch.hub.load(
+                repo_or_dir=cache_dir,
+                model='silero_vad',
+                source='local',
+            )
+        else:
+            _silero_model, utils = torch.hub.load(
+                repo_or_dir='snakers4/silero-vad',
+                model='silero_vad',
+                trust_repo=True,
+            )
+        _silero_get_speech_ts = utils[0]
+        logger.info("Silero VAD model loaded")
+    return _silero_model, _silero_get_speech_ts
 
 
 def assess_audio_quality(wav_path: str) -> dict:
@@ -70,11 +100,63 @@ def assess_audio_quality(wav_path: str) -> dict:
 
 
 def _compute_snr(audio: np.ndarray, sr: int) -> tuple[float, float, list]:
-    """Estimate SNR using energy-based voice activity detection."""
+    """Estimate SNR using VAD for speech/noise classification.
+
+    Uses energy-based VAD by default (fast, reliable).
+    Silero VAD available via _compute_snr_silero() for higher accuracy.
+    """
+    return _compute_snr_energy(audio, sr)
+
+
+def _compute_snr_silero(audio: np.ndarray, sr: int) -> tuple[float, float, list]:
+    """SNR estimation using Silero VAD for accurate speech detection."""
+    model, get_speech_timestamps = _get_silero_vad()
+
+    audio_tensor = torch.from_numpy(audio.copy()).float()
+
+    speech_ts = get_speech_timestamps(
+        audio_tensor, model,
+        sampling_rate=sr,
+        threshold=0.5,
+        min_speech_duration_ms=250,
+        min_silence_duration_ms=100,
+    )
+
+    # Convert sample indices to seconds
+    speech_timestamps = [
+        {"start": round(ts["start"] / sr, 3), "end": round(ts["end"] / sr, 3)}
+        for ts in speech_ts
+    ]
+
+    if not speech_timestamps:
+        return 0.0, 0.0, []
+
+    # Build speech mask on original audio samples
+    is_speech = np.zeros(len(audio), dtype=bool)
+    for ts in speech_timestamps:
+        s = int(ts["start"] * sr)
+        e = min(int(ts["end"] * sr), len(audio))
+        is_speech[s:e] = True
+
+    speech_energy = np.mean(audio[is_speech] ** 2) if np.any(is_speech) else 1e-10
+    noise_energy = np.mean(audio[~is_speech] ** 2) if np.any(~is_speech) else 1e-10
+
+    snr_db = 10 * np.log10(max(speech_energy, 1e-10) / max(noise_energy, 1e-10))
+    snr_db = max(0, min(40, snr_db))
+
+    snr_score = min(100, snr_db * 5)
+
+    # Reset Silero model state for next call
+    model.reset_states()
+
+    return snr_score, snr_db, speech_timestamps
+
+
+def _compute_snr_energy(audio: np.ndarray, sr: int) -> tuple[float, float, list]:
+    """Fallback: SNR estimation using simple energy-based VAD."""
     frame_length = int(0.025 * sr)  # 25ms frames
     hop_length = int(0.010 * sr)    # 10ms hop
 
-    # Compute frame energies
     energies = []
     for i in range(0, len(audio) - frame_length, hop_length):
         frame = audio[i:i + frame_length]
@@ -84,7 +166,6 @@ def _compute_snr(audio: np.ndarray, sr: int) -> tuple[float, float, list]:
     if len(energies) == 0:
         return 0.0, 0.0, []
 
-    # Simple threshold: frames above median energy are "speech"
     threshold = np.median(energies) * 1.5
     is_speech = energies > threshold
 
@@ -92,12 +173,10 @@ def _compute_snr(audio: np.ndarray, sr: int) -> tuple[float, float, list]:
     noise_energy = np.mean(energies[~is_speech]) if np.any(~is_speech) else 1e-10
 
     snr_db = 10 * np.log10(speech_energy / max(noise_energy, 1e-10))
-    snr_db = max(0, min(40, snr_db))  # Clip to reasonable range
+    snr_db = max(0, min(40, snr_db))
 
-    # Score: 0dB → 0, 10dB → 50, 20dB+ → 100
     snr_score = min(100, snr_db * 5)
 
-    # Build speech timestamps for other functions
     speech_timestamps = []
     in_speech = False
     start = 0
@@ -169,8 +248,20 @@ def _compute_spectral_score(wav_path: str) -> float:
         hnr_col = [c for c in features.columns if "HNR" in c.upper() or "hnr" in c.lower()]
         if hnr_col:
             hnr_mean = features[hnr_col[0]].values[0]
-            # HNR: 0-5 dB = poor, 5-15 dB = fair, 15+ dB = good
-            spectral_score = min(100, max(0, hnr_mean * 5))
+            # Telephony-calibrated HNR scoring:
+            # Phone-line audio (MP3/VoIP) typically has HNR 0-5dB due to
+            # codec compression, not actual quality problems. The old linear
+            # scaling (hnr*5) gave 8/100 for normal telephony — catastrophically low.
+            if hnr_mean >= 15:
+                spectral_score = 100.0  # Studio/clean recording
+            elif hnr_mean >= 8:
+                spectral_score = 80.0   # Good quality
+            elif hnr_mean >= 3:
+                spectral_score = 60.0   # Normal telephony
+            elif hnr_mean >= 0:
+                spectral_score = 40.0   # Degraded telephony (still usable)
+            else:
+                spectral_score = 20.0   # Very poor
         else:
             spectral_score = 50.0  # Default if HNR not found
 

@@ -135,12 +135,16 @@ def detect_silence_anomalies(
     min_silence_duration: float = 0.05,
     max_natural_silence: float = 2.0,
     audio_data: tuple = None,
+    digital_zero_threshold: float = 1e-10,
 ) -> list[TamperSignal]:
     """Detect unnatural silence patterns suggesting audio editing.
 
     Args:
         wav_path: Path to WAV file (used if audio_data not provided)
         audio_data: Pre-loaded (y, sr) tuple to avoid redundant disk reads
+        digital_zero_threshold: Amplitude below which samples are considered
+            "digital zero". Use 1e-10 for lossless (WAV), 1e-6 for lossy
+            (MP3/AAC) which produce near-zero but not exactly zero frames.
     """
     if not HAS_LIBROSA:
         return []
@@ -171,7 +175,7 @@ def detect_silence_anomalies(
 
         # Check for digital silence (perfectly zero samples)
         gap_audio = y[gap_start:gap_end]
-        is_digital_zero = np.all(np.abs(gap_audio) < 1e-10) if len(gap_audio) > 0 else False
+        is_digital_zero = np.all(np.abs(gap_audio) < digital_zero_threshold) if len(gap_audio) > 0 else False
 
         gaps.append({
             "start": gap_start_time,
@@ -215,12 +219,19 @@ def detect_silence_anomalies(
     return signals
 
 
-def detect_noise_floor_inconsistency(wav_path: str = None, audio_data: tuple = None) -> list[TamperSignal]:
+def detect_noise_floor_inconsistency(
+    wav_path: str = None,
+    audio_data: tuple = None,
+    deviation_threshold: float = 3.0,
+) -> list[TamperSignal]:
     """Detect inconsistent background noise levels across the recording.
 
     Args:
         wav_path: Path to WAV file (used if audio_data not provided)
         audio_data: Pre-loaded (y, sr) tuple to avoid redundant disk reads
+        deviation_threshold: How many std devs from median to flag. Use 3.0
+            for lossless (WAV), 5.0 for lossy (MP3/AAC) which naturally
+            have variable noise floors due to VBR encoding.
     """
     if not HAS_LIBROSA:
         return []
@@ -265,7 +276,7 @@ def detect_noise_floor_inconsistency(wav_path: str = None, audio_data: tuple = N
     for nf in noise_floors:
         if median_floor > 0:
             deviation = abs(nf["noise_floor"] - median_floor) / max(std_floor, median_floor * 0.1)
-            if deviation > 3:
+            if deviation > deviation_threshold:
                 signals.append(TamperSignal(
                     signal_type="noise_floor_inconsistency",
                     description=(
@@ -281,10 +292,18 @@ def detect_noise_floor_inconsistency(wav_path: str = None, audio_data: tuple = N
     return signals
 
 
-def run_tamper_detection(wav_path: str) -> list[TamperSignal]:
-    """Run all tamper detection analyses.
+def run_tamper_detection(wav_path: str, source_codec: str = "") -> list[TamperSignal]:
+    """Run all tamper detection analyses with codec awareness.
 
-    Loads audio once and passes to all sub-functions to avoid triple disk reads.
+    Lossy codecs (MP3, AAC, OGG, etc.) create compression artifacts that mimic
+    tampering signals — near-zero silence frames, variable noise floors. This
+    function adjusts thresholds based on the source codec to reduce false positives.
+
+    Args:
+        wav_path: Path to normalized WAV file
+        source_codec: Original codec before normalization (e.g. "mp3", "aac", "wav").
+                      Used to adjust thresholds for lossy compression artifacts.
+
     Returns combined list of all detected tampering signals.
     """
     if not HAS_LIBROSA:
@@ -297,6 +316,11 @@ def run_tamper_detection(wav_path: str) -> list[TamperSignal]:
         logger.warning(f"Could not load audio for tamper detection: {e}")
         return []
 
+    # Determine if source was lossy (compression artifacts expected)
+    lossy_codecs = {"mp3", "aac", "ogg", "opus", "wma", "m4a", "vorbis", "amr"}
+    codec_lower = source_codec.lower().strip() if source_codec else ""
+    is_lossy = any(c in codec_lower for c in lossy_codecs)
+
     audio = (y, sr)
     signals = []
 
@@ -304,17 +328,31 @@ def run_tamper_detection(wav_path: str) -> list[TamperSignal]:
     spectral = detect_spectral_discontinuities(audio_data=audio)
     signals.extend(spectral)
 
-    # Silence anomalies
-    silence = detect_silence_anomalies(audio_data=audio)
+    # Silence anomalies — use relaxed threshold for lossy codecs
+    silence_threshold = 1e-6 if is_lossy else 1e-10
+    silence = detect_silence_anomalies(audio_data=audio, digital_zero_threshold=silence_threshold)
     signals.extend(silence)
 
-    # Noise floor consistency
-    noise = detect_noise_floor_inconsistency(audio_data=audio)
+    # Noise floor consistency — use relaxed deviation threshold for lossy codecs
+    noise_deviation_threshold = 5.0 if is_lossy else 3.0
+    noise = detect_noise_floor_inconsistency(audio_data=audio, deviation_threshold=noise_deviation_threshold)
     signals.extend(noise)
+
+    # Corroboration: require multiple signal TYPES for elevated risk.
+    # A single signal type alone (e.g. 6 noise_floor signals) should not
+    # push risk to "high" — real tampering shows across multiple analysis types.
+    signal_types_present = set(s.signal_type for s in signals)
+    if len(signal_types_present) < 2:
+        # Only one type of signal — cap severity at "medium"
+        for s in signals:
+            if s.severity == "high":
+                s.severity = "medium"
+                s.description += " [single-type signal — capped at medium]"
 
     if signals:
         high = sum(1 for s in signals if s.severity == "high")
-        logger.info(f"Tamper detection: {len(signals)} signals ({high} high severity)")
+        codec_note = f", source={codec_lower or 'unknown'}" if is_lossy else ""
+        logger.info(f"Tamper detection: {len(signals)} signals ({high} high severity{codec_note})")
     else:
         logger.info("Tamper detection: no tampering signals detected")
 

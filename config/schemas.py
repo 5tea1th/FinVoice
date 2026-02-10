@@ -21,6 +21,7 @@ class CallIntent(str, Enum):
     DISPUTE = "dispute"
     ACKNOWLEDGMENT = "acknowledgment"
     GREETING = "greeting"
+    UNKNOWN = "unknown"
 
 
 class UtteranceIntent(BaseModel):
@@ -209,6 +210,11 @@ class CallRecord(BaseModel):
 
     # Language Detection
     detected_language: str = Field(default="en", description="Auto-detected primary language")
+    has_code_switching: bool = Field(default=False, description="True if >10% of segments differ from primary language")
+    language_distribution: dict = Field(
+        default_factory=dict,
+        description="Language distribution across segments: {lang_code: count}"
+    )
     language_segments: list[dict] = Field(
         default_factory=list,
         description="Per-segment language detection for code-switching"
@@ -222,6 +228,10 @@ class CallRecord(BaseModel):
         description="Sentiment score per segment for agent turns"
     )
     customer_emotion_dominant: str = Field(description="Most frequent customer emotion")
+    sentiment_context: dict = Field(
+        default_factory=dict,
+        description="Sentiment interpretation: {type: 'financial_negative'|'emotional_negative'|'neutral', actionable: bool}"
+    )
     escalation_detected: bool
 
     # Risk Assessment
@@ -241,6 +251,10 @@ class CallRecord(BaseModel):
     speaker_emotion_breakdown: dict = Field(
         default_factory=dict,
         description="Per-speaker emotion profile: {speaker: {dominant, distribution, total_segments}}"
+    )
+    emotion_transitions: list[dict] = Field(
+        default_factory=list,
+        description="Significant emotion shifts per speaker: [{speaker, from_emotion, to_emotion, at_segment, significance}]"
     )
 
     # Call Summary

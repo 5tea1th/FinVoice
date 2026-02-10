@@ -54,7 +54,10 @@ def normalize_audio(
     ffmpeg_cmd += ["-i", input_path]
     if end_time is not None and end_time > 0:
         ffmpeg_cmd += ["-to", str(end_time - (start_time or 0))]
-    ffmpeg_cmd += ["-ar", "16000", "-ac", "1", "-c:a", "pcm_s16le", "-y", output_path]
+    ffmpeg_cmd += [
+        "-af", "loudnorm=I=-23:TP=-1.5:LRA=11",
+        "-ar", "16000", "-ac", "1", "-c:a", "pcm_s16le", "-y", output_path,
+    ]
 
     if start_time or end_time:
         logger.info(f"Trimming audio: start={start_time}s, end={end_time}s")

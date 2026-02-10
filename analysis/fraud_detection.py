@@ -66,10 +66,27 @@ def analyze_voice_stress(wav_path: str, segments: list) -> list[FraudSignal]:
         if len(features) < 3:
             continue
 
-        # Baseline: first 30s of this speaker's segments
-        baseline_feats = [f for f in features if f["start"] < 30]
-        if len(baseline_feats) < 2:
-            baseline_feats = features[:3]
+        # Baseline: calmest 30s window within the first 90s of this speaker.
+        # Sliding window minimum avoids using stressed opening as baseline.
+        early_feats = [f for f in features if f["start"] < 90]
+        if len(early_feats) < 2:
+            early_feats = features[:3]
+
+        best_baseline_feats = None
+        best_stress = float("inf")
+        for win_start_idx in range(len(early_feats)):
+            # Collect features within a 30s window
+            win_start_time = early_feats[win_start_idx]["start"]
+            win_feats = [f for f in early_feats if f["start"] >= win_start_time and f["start"] < win_start_time + 30]
+            if len(win_feats) < 2:
+                continue
+            # Score this window by average jitter + shimmer (lower = calmer)
+            avg_stress = np.mean([f["jitter"] for f in win_feats]) + np.mean([f["shimmer"] for f in win_feats])
+            if avg_stress < best_stress:
+                best_stress = avg_stress
+                best_baseline_feats = win_feats
+
+        baseline_feats = best_baseline_feats or early_feats[:3]
 
         baseline = {
             "pitch_mean": np.mean([f["pitch_mean"] for f in baseline_feats if f["pitch_mean"] > 0]) or 150,
@@ -103,6 +120,10 @@ def detect_coached_speech(segments: list) -> list[FraudSignal]:
 
     Natural speech has variable WPM (words per minute). Rehearsed or read speech
     maintains unnaturally consistent pacing.
+
+    Code-switching aware: if segments have per-segment 'lang' tags, WPM CV is
+    computed separately per language to avoid false positives from natural
+    WPM variation between Hindi and English.
     """
     signals = []
 
@@ -125,11 +146,34 @@ def detect_coached_speech(segments: list) -> list[FraudSignal]:
             word_count = len(text.split())
             wpm = (word_count / duration) * 60
             if 50 < wpm < 300:  # filter outliers
-                wpm_values.append((seg_idx, wpm))
+                lang = seg.get("lang", "en")
+                wpm_values.append((seg_idx, wpm, lang))
 
         if len(wpm_values) < 5:
             continue
 
+        # Check if code-switching is present (multiple languages)
+        langs_present = set(v[2] for v in wpm_values)
+        has_code_switching = len(langs_present) > 1
+
+        if has_code_switching:
+            # Compute CV per language — only flag if ALL languages show low CV
+            all_coached = True
+            for lang in langs_present:
+                lang_wpms = [v[1] for v in wpm_values if v[2] == lang]
+                if len(lang_wpms) < 3:
+                    continue  # not enough data for this language
+                lang_mean = np.mean(lang_wpms)
+                lang_std = np.std(lang_wpms)
+                lang_cv = lang_std / lang_mean if lang_mean > 0 else 1
+                if lang_cv >= 0.10:
+                    all_coached = False
+                    break
+
+            if not all_coached:
+                continue  # natural WPM variation from code-switching
+
+        # Standard analysis (single language or all languages have low CV)
         wpms = [w[1] for w in wpm_values]
         mean_wpm = np.mean(wpms)
         std_wpm = np.std(wpms)
@@ -314,6 +358,106 @@ def detect_content_scam_indicators(segments: list) -> list[FraudSignal]:
     return signals
 
 
+def detect_abuse_signals(segments: list) -> list[FraudSignal]:
+    """Detect abusive/threatening content using MuRIL (10 Indian languages).
+
+    Complements vocab-based scam detection with model-based abuse detection.
+    Catches Hindi code-mixed threats, caste-based abuse, and culturally
+    specific insults that English-only models miss.
+    """
+    try:
+        from analysis.indic_abuse_detector import detect_abuse_batch
+    except ImportError:
+        return []
+
+    signals = []
+    texts = []
+    seg_map = []  # (segment_index, speaker)
+
+    for i, seg in enumerate(segments):
+        text = seg.get("text", "").strip()
+        if text and len(text) > 5:
+            texts.append(text)
+            seg_map.append((i, seg.get("speaker", "unknown")))
+
+    if not texts:
+        return []
+
+    flagged = detect_abuse_batch(texts, threshold=0.7)
+
+    for item in flagged:
+        batch_idx = item["index"]
+        if batch_idx >= len(seg_map):
+            continue
+        seg_idx, speaker = seg_map[batch_idx]
+
+        signals.append(FraudSignal(
+            signal_type="abusive_content",
+            description=(
+                f"MuRIL detected {item['label']} content from {speaker} "
+                f"at segment {seg_idx} (score={item['score']:.2f}): "
+                f"'{texts[batch_idx][:80]}...'"
+            ),
+            segment_id=seg_idx,
+            confidence=item["score"],
+        ))
+
+    if signals:
+        logger.info(f"MuRIL abuse detection: {len(signals)} signals")
+
+    return signals
+
+
+def detect_scam_zero_shot(segments: list) -> list[FraudSignal]:
+    """Detect scam patterns using zero-shot mDeBERTa (100+ languages).
+
+    Classifies segments against scam hypotheses without any training data.
+    Catches social engineering, credential phishing, and identity theft
+    in any language including Hindi/Tamil code-mixed.
+    """
+    try:
+        from analysis.zero_shot_scam import classify_scam_batch
+    except ImportError:
+        return []
+
+    signals = []
+    texts = []
+    seg_map = []
+
+    for i, seg in enumerate(segments):
+        text = seg.get("text", "").strip()
+        if text and len(text) > 10:
+            texts.append(text)
+            seg_map.append((i, seg.get("speaker", "unknown")))
+
+    if not texts:
+        return []
+
+    flagged = classify_scam_batch(texts, threshold=0.7)
+
+    for item in flagged:
+        batch_idx = item["index"]
+        if batch_idx >= len(seg_map):
+            continue
+        seg_idx, speaker = seg_map[batch_idx]
+
+        signals.append(FraudSignal(
+            signal_type=f"scam_{item['scam_type']}",
+            description=(
+                f"Zero-shot classifier detected {item['scam_type']} "
+                f"from {speaker} at segment {seg_idx} "
+                f"(score={item['score']:.2f}): '{texts[batch_idx][:80]}...'"
+            ),
+            segment_id=seg_idx,
+            confidence=item["score"],
+        ))
+
+    if signals:
+        logger.info(f"Zero-shot scam detection: {len(signals)} signals")
+
+    return signals
+
+
 def run_fraud_detection(wav_path: str, segments: list) -> list[FraudSignal]:
     """Run all fraud detection analyses and return combined signals."""
     signals = []
@@ -330,9 +474,17 @@ def run_fraud_detection(wav_path: str, segments: list) -> list[FraudSignal]:
     speaker_signals = detect_speaker_anomalies(segments)
     signals.extend(speaker_signals)
 
-    # Content-based scam indicators (social engineering patterns)
+    # Content-based scam indicators (social engineering patterns from vocab)
     content_signals = detect_content_scam_indicators(segments)
     signals.extend(content_signals)
+
+    # MuRIL abuse detection (10 Indian languages, model-based)
+    abuse_signals = detect_abuse_signals(segments)
+    signals.extend(abuse_signals)
+
+    # Zero-shot scam classification (100+ languages, no training needed)
+    scam_signals = detect_scam_zero_shot(segments)
+    signals.extend(scam_signals)
 
     if signals:
         logger.info(f"Fraud detection: {len(signals)} signals found")

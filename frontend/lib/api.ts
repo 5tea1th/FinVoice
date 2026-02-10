@@ -603,3 +603,87 @@ export async function submitReviewAction(
 export function getAudioUrl(callId: string): string {
   return `${API_BASE}/calls/${callId}/audio`;
 }
+
+// ===== EXPORT FUNCTIONS =====
+
+export type ExportFormat =
+  | 'csv' | 'parquet' | 'jsonl'
+  | 'training_intents' | 'training_sentiment' | 'training_entities';
+
+const EXPORT_LABELS: Record<ExportFormat, string> = {
+  csv: 'Call Summary (CSV)',
+  parquet: 'Full Data (Parquet)',
+  jsonl: 'Full Records (JSONL)',
+  training_intents: 'Intent Training Pairs',
+  training_sentiment: 'Sentiment Training Pairs',
+  training_entities: 'Entity/NER Training Pairs',
+};
+
+export function getExportLabel(format: ExportFormat): string {
+  return EXPORT_LABELS[format] || format;
+}
+
+export async function downloadExport(format: ExportFormat): Promise<boolean> {
+  try {
+    const res = await fetch(`${API_BASE}/export/${format}`);
+    if (!res.ok) return false;
+
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    const ext = format === 'csv' ? '.csv' : format === 'parquet' ? '.parquet' : '.jsonl';
+    a.href = url;
+    a.download = `finvoice_${format}${ext}`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function downloadCallJson(callId: string): Promise<boolean> {
+  try {
+    const res = await fetch(`${API_BASE}/calls/${callId}/download`);
+    if (!res.ok) return false;
+
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${callId}_analysis.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function downloadMaskedTranscript(callId: string): Promise<boolean> {
+  try {
+    const res = await fetch(`${API_BASE}/calls/${callId}/transcript/masked`);
+    if (!res.ok) return false;
+
+    const data = await res.json();
+    const text = (data.segments || [])
+      .map((s: Record<string, unknown>) => `[${s.speaker}] ${s.text}`)
+      .join('\n');
+    const blob = new Blob([text], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${callId}_masked_transcript.txt`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    return true;
+  } catch {
+    return false;
+  }
+}

@@ -46,6 +46,7 @@ class SegmentEmotion(BaseModel):
     emotion: str = Field(description="Primary emotion: angry, happy, sad, neutral, etc.")
     emotion_score: float = Field(ge=0, le=1, description="Confidence of primary emotion")
     all_scores: dict[str, float] = Field(description="Scores for all 8 emotions")
+    low_confidence: bool = Field(default=False, description="True if emotion was below confidence threshold")
 
 
 def _get_model():
@@ -158,12 +159,23 @@ def _parse_emotion_result(result_item, segment_id: int, speaker: str) -> Segment
     primary = max(score_dict, key=score_dict.get)
     primary_score = score_dict[primary]
 
+    # Confidence threshold: below 0.4, the classification isn't meaningful.
+    # Also remap "other"/<unk> to "neutral" — these are unclassifiable segments.
+    MIN_CONFIDENCE = 0.4
+    is_low_confidence = primary_score < MIN_CONFIDENCE or primary == "other"
+
+    if is_low_confidence:
+        # Fall back to "neutral" but preserve original scores for debugging
+        primary = "neutral"
+        primary_score = score_dict.get("neutral", primary_score)
+
     return SegmentEmotion(
         segment_id=segment_id,
         speaker=speaker,
         emotion=primary,
         emotion_score=round(primary_score, 3),
         all_scores={k: round(v, 3) for k, v in score_dict.items()},
+        low_confidence=is_low_confidence,
     )
 
 
@@ -236,11 +248,40 @@ def analyze_emotions(
         logger.warning("emotion2vec: no valid segments to analyze (all too short)")
         return []
 
-    # Subsample for very long files (>100 segments) — process every 2nd segment
+    # Smart subsample for very long files (>100 segments)
+    # Prioritize: speaker changes, first/last 5 segments per speaker, then uniform skip
     if len(valid_segments) > 100:
         original_count = len(valid_segments)
-        valid_segments = valid_segments[::2]
-        logger.info(f"emotion2vec: subsampling {original_count} → {len(valid_segments)} segments (long file)")
+        keep_indices = set()
+
+        # Always keep first 5 and last 5 segments
+        for idx in range(min(5, len(valid_segments))):
+            keep_indices.add(idx)
+        for idx in range(max(0, len(valid_segments) - 5), len(valid_segments)):
+            keep_indices.add(idx)
+
+        # Keep segments near speaker changes
+        prev_speaker = None
+        for idx, (_, seg, _) in enumerate(valid_segments):
+            speaker = seg.get("speaker", "")
+            if speaker != prev_speaker and prev_speaker is not None:
+                # Keep the segment before and after the change
+                keep_indices.add(max(0, idx - 1))
+                keep_indices.add(idx)
+            prev_speaker = speaker
+
+        # Fill remaining with uniform sampling to reach ~60 segments
+        target = 60
+        if len(keep_indices) < target:
+            remaining = [i for i in range(len(valid_segments)) if i not in keep_indices]
+            step = max(1, len(remaining) // (target - len(keep_indices)))
+            for i in range(0, len(remaining), step):
+                keep_indices.add(remaining[i])
+                if len(keep_indices) >= target:
+                    break
+
+        valid_segments = [valid_segments[i] for i in sorted(keep_indices)]
+        logger.info(f"emotion2vec: smart subsampling {original_count} → {len(valid_segments)} segments")
 
     logger.info(f"emotion2vec: processing {len(valid_segments)} segments (direct numpy, no temp files)")
     results = []
@@ -405,3 +446,93 @@ def get_speaker_emotion_breakdown(emotions: list[SegmentEmotion]) -> dict:
         }
 
     return result
+
+
+def detect_emotion_transitions(emotions: list[SegmentEmotion]) -> list[dict]:
+    """Detect significant per-speaker emotion shifts across the call.
+
+    Tracks when a speaker's emotion changes meaningfully (e.g. neutral → angry)
+    and reports the segment. Ignores low-confidence segments and requires
+    the new emotion to persist for at least 2 consecutive segments.
+
+    Returns:
+        List of transitions: [
+            {"speaker": "customer", "from_emotion": "neutral", "to_emotion": "angry",
+             "at_segment": 22, "significance": "high"},
+        ]
+    """
+    if not emotions:
+        return []
+
+    # Group by speaker, sorted by segment_id
+    by_speaker: dict[str, list[SegmentEmotion]] = {}
+    for e in emotions:
+        by_speaker.setdefault(e.speaker, []).append(e)
+
+    transitions = []
+
+    negative_emotions = {"angry", "fearful", "sad", "disgusted"}
+    positive_emotions = {"happy", "surprised"}
+
+    for speaker, speaker_emotions in by_speaker.items():
+        speaker_emotions.sort(key=lambda e: e.segment_id)
+
+        # Skip low-confidence segments for transition detection
+        confident = [e for e in speaker_emotions if not e.low_confidence]
+        if len(confident) < 3:
+            continue
+
+        prev_emotion = confident[0].emotion
+        prev_segment = confident[0].segment_id
+
+        for i in range(1, len(confident)):
+            curr = confident[i]
+            if curr.emotion == prev_emotion:
+                continue
+
+            # Check if the new emotion persists (next segment also has it)
+            persists = (
+                i + 1 < len(confident)
+                and confident[i + 1].emotion == curr.emotion
+            )
+            # Or if confidence is very high, a single segment counts
+            high_conf = curr.emotion_score >= 0.7
+
+            if not persists and not high_conf:
+                continue
+
+            # Determine significance
+            to_neg = curr.emotion in negative_emotions
+            from_neg = prev_emotion in negative_emotions
+            to_pos = curr.emotion in positive_emotions
+
+            if prev_emotion == "neutral" and to_neg:
+                significance = "high"
+            elif from_neg and to_pos:
+                significance = "medium"  # Recovery
+            elif to_neg and not from_neg:
+                significance = "high"
+            elif prev_emotion != curr.emotion:
+                significance = "low"
+            else:
+                continue
+
+            transitions.append({
+                "speaker": speaker,
+                "from_emotion": prev_emotion,
+                "to_emotion": curr.emotion,
+                "at_segment": curr.segment_id,
+                "from_segment": prev_segment,
+                "significance": significance,
+            })
+
+            prev_emotion = curr.emotion
+            prev_segment = curr.segment_id
+
+    transitions.sort(key=lambda t: t["at_segment"])
+
+    if transitions:
+        high = sum(1 for t in transitions if t["significance"] == "high")
+        logger.info(f"Emotion transitions: {len(transitions)} detected ({high} high significance)")
+
+    return transitions

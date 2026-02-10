@@ -159,6 +159,44 @@ def detect_profanity(segments: list) -> list[ToxicityFlag]:
             is_agent=is_agent,
         ))
 
+    # ── MuRIL abuse detection (Hindi/Tamil/Indian languages) ──
+    # Detoxify covers English well but misses Hindi code-mixed abuse.
+    # MuRIL handles 10 Indian languages natively — shared model with fraud module.
+    try:
+        from analysis.indic_abuse_detector import detect_abuse_batch
+        muril_flagged = detect_abuse_batch(texts, threshold=0.6)
+        flagged_seg_ids = {f.segment_id for f in flags}  # Already flagged by Detoxify
+
+        for item in muril_flagged:
+            batch_idx = item["index"]
+            if batch_idx >= len(indices):
+                continue
+            seg_idx = indices[batch_idx]
+
+            # Skip if Detoxify already flagged this segment
+            if seg_idx in flagged_seg_ids:
+                continue
+
+            seg = segments[seg_idx]
+            speaker = seg.get("speaker", "unknown").lower()
+            is_agent = speaker in ("agent", "speaker_00", "speaker a")
+
+            severity = "high" if is_agent else "medium"
+            if item["score"] >= 0.9:
+                severity = "critical" if is_agent else "high"
+
+            flags.append(ToxicityFlag(
+                segment_id=seg_idx,
+                speaker=speaker,
+                text=seg.get("text", ""),
+                toxicity_score=round(item["score"], 3),
+                categories=["muril_abuse", item["label"]],
+                severity=severity,
+                is_agent=is_agent,
+            ))
+    except ImportError:
+        pass  # MuRIL not available — Detoxify-only mode
+
     if flags:
         agent_flags = sum(1 for f in flags if f.is_agent)
         logger.info(
