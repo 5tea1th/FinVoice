@@ -1,0 +1,1895 @@
+{
+  "call_id": "cc2e45e6",
+  "audio_file": "data/raw_audio/4344866.mp3",
+  "duration_seconds": 240.0,
+  "language": "en",
+  "call_type": "general",
+  "audio_quality_score": 65,
+  "audio_quality_flag": "DEGRADED",
+  "snr_db": 15.7,
+  "audio_quality_components": {
+    "snr": 78.6,
+    "clipping": 100.0,
+    "speech_ratio": 60.0,
+    "spectral": "8.0"
+  },
+  "speech_percentage": 43.5,
+  "num_speakers": 2,
+  "agent_talk_percentage": 61.2,
+  "customer_talk_percentage": 27.0,
+  "transcript_segments": [
+    {
+      "id": 0,
+      "start": 0.03,
+      "end": 8.7,
+      "text": " of our 2020 spend will be on our gas utilities, with two-thirds of the increase, or about $20 million, attributable to utility investment.",
+      "speaker": "agent",
+      "confidence": 0.845
+    },
+    {
+      "id": 1,
+      "start": 9.6,
+      "end": 13.13,
+      "text": "We also plan to invest $10 million in the third quarter at Spire Store.",
+      "speaker": "agent",
+      "confidence": 0.752
+    },
+    {
+      "id": 2,
+      "start": 13.35,
+      "end": 29.53,
+      "text": "Regulatory mechanisms we have, including incentives to accelerate system upgrades in Missouri and Alabama and real-time rate-making in Alabama, are key to timely recovery and support infrastructure modernization, earnings growth, and better environmental performance through reduced methane emissions.",
+      "speaker": "agent",
+      "confidence": 0.765
+    },
+    {
+      "id": 3,
+      "start": 30.42,
+      "end": 45.68,
+      "text": " As you know from our discussion last quarter, in Missouri, we have been working through a number of ISRS cases decided by the Missouri Public Service Commission going back to 2016 that have been challenged and appealed by the Office of Public Counsel and resulted in adverse appellate court rulings late last year.",
+      "speaker": "agent",
+      "confidence": 0.79
+    },
+    {
+      "id": 4,
+      "start": 46.76,
+      "end": 59.94,
+      "text": "At the time of the appeal court orders, we said we would pursue all avenues, legislative, judicial, and regulatory, to preserve the ability to continue investing in the safety, reliability, and environmental performance of our pipeline systems.",
+      "speaker": "agent",
+      "confidence": 0.85
+    },
+    {
+      "id": 5,
+      "start": 60.39,
+      "end": 63.48,
+      "text": " while achieving timely recovery.",
+      "speaker": "agent",
+      "confidence": 0.86
+    },
+    {
+      "id": 6,
+      "start": 63.5,
+      "end": 74.87,
+      "text": "The start of the Missouri legislative session in January, we worked to introduce bills in both the House and Senate to clarify the ISRA statute as it relates to the eligibility of infrastructure upgrade spend for accelerated recovery.",
+      "speaker": "agent",
+      "confidence": 0.76
+    },
+    {
+      "id": 7,
+      "start": 75.69,
+      "end": 77.65,
+      "text": "The Senate bill passed early March.",
+      "speaker": "agent",
+      "confidence": 0.879
+    },
+    {
+      "id": 8,
+      "start": 78.27,
+      "end": 81.14,
+      "text": "On May 6th, the House passed the substitution of the Senate bill.",
+      "speaker": "agent",
+      "confidence": 0.862
+    },
+    {
+      "id": 9,
+      "start": 82.1,
+      "end": 88.85,
+      "text": "Given the differences between the versions passed in each chamber, the legislation will now go to Conference Committee to reconcile the two versions.",
+      "speaker": "agent",
+      "confidence": 0.862
+    },
+    {
+      "id": 10,
+      "start": 89.96,
+      "end": 94.2,
+      "text": " Meanwhile, we have continued to file new ISRIS requests, including one in early February.",
+      "speaker": "agent",
+      "confidence": 0.788
+    },
+    {
+      "id": 11,
+      "start": 95.18,
+      "end": 109.46,
+      "text": "Late last month, we, the staff of the Missouri Public Service Commission, and the Office of Public Counsel reached a unanimous stipulation and agreement, subject to Missouri PSC approval, that would result in an $11 million annualized increase in ISRIS revenue.",
+      "speaker": "agent",
+      "confidence": 0.829
+    },
+    {
+      "id": 12,
+      "start": 110.92,
+      "end": 119.49,
+      "text": "Regarding the cases subject to the appeals court ruling, these have been remanded back to the Missouri Public Service Commission for final resolution following the denial of our request",
+      "speaker": "agent",
+      "confidence": 0.801
+    },
+    {
+      "id": 13,
+      "start": 119.86,
+      "end": 123.32,
+      "text": " for the Missouri Supreme Court review in mid-March.",
+      "speaker": "agent",
+      "confidence": 0.673
+    },
+    {
+      "id": 14,
+      "start": 123.34,
+      "end": 129.21,
+      "text": "The Commission has 120 days or until the middle of July to render a decision including whether any refund is required.",
+      "speaker": "agent",
+      "confidence": 0.854
+    },
+    {
+      "id": 15,
+      "start": 130.45,
+      "end": 135.78,
+      "text": "For anyone who would like more detail on the various ISRIS cases, there's a table in the appendix of our slide presentation today.",
+      "speaker": "agent",
+      "confidence": 0.778
+    },
+    {
+      "id": 16,
+      "start": 135.8,
+      "end": 141.93,
+      "text": "Finally, in Alabama, we have been implementing new off-system sales and capacity release program that went into effect December 1st.",
+      "speaker": "agent",
+      "confidence": 0.754
+    },
+    {
+      "id": 17,
+      "start": 142.65,
+      "end": 147.89,
+      "text": "We're also continuing to pursue the benefits of the Accelerated Infrastructure Modernization Rider, or AIM,",
+      "speaker": "agent",
+      "confidence": 0.78
+    },
+    {
+      "id": 18,
+      "start": 148.19,
+      "end": 156.42,
+      "text": " and are on track to achieve the threshold number of miles replaced this year in order to qualify for the ROE adder in 2021, like we received this past year.",
+      "speaker": "agent",
+      "confidence": 0.786
+    },
+    {
+      "id": 19,
+      "start": 157.24,
+      "end": 159.97,
+      "text": "With that, I'll turn the call over to Steve Rasche for a financial",
+      "speaker": "agent",
+      "confidence": 0.652
+    },
+    {
+      "id": 20,
+      "start": 160.01,
+      "end": 160.81,
+      "text": "review and update.",
+      "speaker": "customer",
+      "confidence": 0.522
+    },
+    {
+      "id": 21,
+      "start": 160.83,
+      "end": 164.29,
+      "text": "Good morning, and let me add my wishes for good health and safety to everyone.",
+      "speaker": "customer",
+      "confidence": 0.828
+    },
+    {
+      "id": 22,
+      "start": 164.67,
+      "end": 171.6,
+      "text": "And a huge shout out to all of our first responders, healthcare workers, and our own team who continue to serve bravely every day.",
+      "speaker": "customer",
+      "confidence": 0.85
+    },
+    {
+      "id": 23,
+      "start": 173.06,
+      "end": 177.09,
+      "text": "Let me cover our quarterly results, the financial impact of coronavirus,",
+      "speaker": "customer",
+      "confidence": 0.821
+    },
+    {
+      "id": 24,
+      "start": 177.49,
+      "end": 180.43,
+      "text": " and an update to our targets for the second half of our fiscal 2020.",
+      "speaker": "customer",
+      "confidence": 0.767
+    },
+    {
+      "id": 25,
+      "start": 180.49,
+      "end": 191.07,
+      "text": "Turning to our results for the quarter, we delivered consolidated net economic earnings of $144 million, down $3.9 million from last year.",
+      "speaker": "customer",
+      "confidence": 0.839
+    },
+    {
+      "id": 26,
+      "start": 192.41,
+      "end": 202.12,
+      "text": "Our gas utility posted earnings of just over $144 million, down $2.4 million from last year as a result of warmer weather and losses on investments.",
+      "speaker": "customer",
+      "confidence": 0.785
+    },
+    {
+      "id": 27,
+      "start": 203.64,
+      "end": 206.35,
+      "text": "Gas marketing delivered earnings of just over $5 million,",
+      "speaker": "customer",
+      "confidence": 0.723
+    },
+    {
+      "id": 28,
+      "start": 206.62,
+      "end": 214.56,
+      "text": " down just over $1 million from last year as higher volumes from our expansion were offset by less favorable market conditions and higher cost.",
+      "speaker": "customer",
+      "confidence": 0.804
+    },
+    {
+      "id": 29,
+      "start": 216.14,
+      "end": 228.59,
+      "text": "And we saw higher earnings from the Spire STL pipeline, which entered service last quarter, a lower loss from Spire storage, reflecting the benefits of our operational improvements, and slightly higher corporate costs.",
+      "speaker": "customer",
+      "confidence": 0.853
+    },
+    {
+      "id": 30,
+      "start": 230.26,
+      "end": 233.5,
+      "text": "Looking at our per share results, current year earnings",
+      "speaker": "customer",
+      "confidence": 0.733
+    }
+  ],
+  "overall_transcript_confidence": 0.789,
+  "num_low_confidence_segments": 3,
+  "intents": [
+    {
+      "segment_id": 0,
+      "speaker": "agent",
+      "intent": "info_request",
+      "confidence": 0.8,
+      "sub_intent": null
+    },
+    {
+      "segment_id": 1,
+      "speaker": "agent",
+      "intent": "info_request",
+      "confidence": 0.8,
+      "sub_intent": null
+    },
+    {
+      "segment_id": 2,
+      "speaker": "agent",
+      "intent": "info_request",
+      "confidence": 0.8,
+      "sub_intent": null
+    },
+    {
+      "segment_id": 3,
+      "speaker": "agent",
+      "intent": "dispute",
+      "confidence": 0.8,
+      "sub_intent": null
+    },
+    {
+      "segment_id": 4,
+      "speaker": "agent",
+      "intent": "consent_given",
+      "confidence": 0.8,
+      "sub_intent": null
+    },
+    {
+      "segment_id": 5,
+      "speaker": "agent",
+      "intent": "acknowledgment",
+      "confidence": 0.9,
+      "sub_intent": null
+    },
+    {
+      "segment_id": 6,
+      "speaker": "agent",
+      "intent": "negotiation",
+      "confidence": 0.8,
+      "sub_intent": null
+    },
+    {
+      "segment_id": 7,
+      "speaker": "agent",
+      "intent": "agreement",
+      "confidence": 0.8,
+      "sub_intent": null
+    },
+    {
+      "segment_id": 8,
+      "speaker": "agent",
+      "intent": "agreement",
+      "confidence": 0.8,
+      "sub_intent": null
+    },
+    {
+      "segment_id": 9,
+      "speaker": "agent",
+      "intent": "negotiation",
+      "confidence": 0.8,
+      "sub_intent": null
+    },
+    {
+      "segment_id": 10,
+      "speaker": "agent",
+      "intent": "info_request",
+      "confidence": 0.8,
+      "sub_intent": null
+    },
+    {
+      "segment_id": 11,
+      "speaker": "agent",
+      "intent": "agreement",
+      "confidence": 0.8,
+      "sub_intent": null
+    },
+    {
+      "segment_id": 12,
+      "speaker": "agent",
+      "intent": "dispute",
+      "confidence": 0.8,
+      "sub_intent": null
+    },
+    {
+      "segment_id": 13,
+      "speaker": "agent",
+      "intent": "info_request",
+      "confidence": 0.8,
+      "sub_intent": null
+    },
+    {
+      "segment_id": 14,
+      "speaker": "agent",
+      "intent": "info_request",
+      "confidence": 0.8,
+      "sub_intent": null
+    },
+    {
+      "segment_id": 15,
+      "speaker": "agent",
+      "intent": "info_request",
+      "confidence": 0.8,
+      "sub_intent": null
+    },
+    {
+      "segment_id": 16,
+      "speaker": "agent",
+      "intent": "negotiation",
+      "confidence": 0.8,
+      "sub_intent": null
+    },
+    {
+      "segment_id": 17,
+      "speaker": "agent",
+      "intent": "negotiation",
+      "confidence": 0.8,
+      "sub_intent": null
+    },
+    {
+      "segment_id": 18,
+      "speaker": "agent",
+      "intent": "negotiation",
+      "confidence": 0.8,
+      "sub_intent": null
+    },
+    {
+      "segment_id": 19,
+      "speaker": "agent",
+      "intent": "greeting",
+      "confidence": 0.8,
+      "sub_intent": null
+    },
+    {
+      "segment_id": 20,
+      "speaker": "customer",
+      "intent": "acknowledgment",
+      "confidence": 0.9,
+      "sub_intent": null
+    },
+    {
+      "segment_id": 21,
+      "speaker": "customer",
+      "intent": "greeting",
+      "confidence": 0.8,
+      "sub_intent": null
+    },
+    {
+      "segment_id": 22,
+      "speaker": "customer",
+      "intent": "consent_given",
+      "confidence": 0.8,
+      "sub_intent": null
+    },
+    {
+      "segment_id": 23,
+      "speaker": "customer",
+      "intent": "info_request",
+      "confidence": 0.8,
+      "sub_intent": null
+    },
+    {
+      "segment_id": 24,
+      "speaker": "customer",
+      "intent": "info_request",
+      "confidence": 0.8,
+      "sub_intent": null
+    },
+    {
+      "segment_id": 25,
+      "speaker": "customer",
+      "intent": "negotiation",
+      "confidence": 0.8,
+      "sub_intent": null
+    },
+    {
+      "segment_id": 26,
+      "speaker": "customer",
+      "intent": "dispute",
+      "confidence": 0.8,
+      "sub_intent": null
+    },
+    {
+      "segment_id": 27,
+      "speaker": "customer",
+      "intent": "info_request",
+      "confidence": 0.8,
+      "sub_intent": null
+    },
+    {
+      "segment_id": 28,
+      "speaker": "customer",
+      "intent": "info_request",
+      "confidence": 0.8,
+      "sub_intent": null
+    },
+    {
+      "segment_id": 29,
+      "speaker": "customer",
+      "intent": "agreement",
+      "confidence": 0.8,
+      "sub_intent": null
+    },
+    {
+      "segment_id": 30,
+      "speaker": "customer",
+      "intent": "acknowledgment",
+      "confidence": 0.5,
+      "sub_intent": null
+    }
+  ],
+  "financial_entities": [
+    {
+      "entity_type": "payment_amount",
+      "value": "20.00 USD",
+      "raw_text": "$20",
+      "segment_id": 0,
+      "start_time": 0.031,
+      "confidence": 0.95
+    },
+    {
+      "entity_type": "payment_amount",
+      "value": "10.00 USD",
+      "raw_text": "$10",
+      "segment_id": 1,
+      "start_time": 9.604,
+      "confidence": 0.95
+    },
+    {
+      "entity_type": "payment_amount",
+      "value": "11.00 USD",
+      "raw_text": "$11",
+      "segment_id": 11,
+      "start_time": 95.184,
+      "confidence": 0.95
+    },
+    {
+      "entity_type": "due_date",
+      "value": "today",
+      "raw_text": "today",
+      "segment_id": 15,
+      "start_time": 130.452,
+      "confidence": 0.9
+    },
+    {
+      "entity_type": "payment_amount",
+      "value": "144.00 USD",
+      "raw_text": "$144",
+      "segment_id": 25,
+      "start_time": 180.492,
+      "confidence": 0.95
+    },
+    {
+      "entity_type": "payment_amount",
+      "value": "3.90 USD",
+      "raw_text": "$3.9",
+      "segment_id": 25,
+      "start_time": 180.492,
+      "confidence": 0.95
+    },
+    {
+      "entity_type": "payment_amount",
+      "value": "144.00 USD",
+      "raw_text": "$144",
+      "segment_id": 26,
+      "start_time": 192.409,
+      "confidence": 0.95
+    },
+    {
+      "entity_type": "payment_amount",
+      "value": "2.40 USD",
+      "raw_text": "$2.4",
+      "segment_id": 26,
+      "start_time": 192.409,
+      "confidence": 0.95
+    },
+    {
+      "entity_type": "payment_amount",
+      "value": "5.00 USD",
+      "raw_text": "$5",
+      "segment_id": 27,
+      "start_time": 203.644,
+      "confidence": 0.95
+    },
+    {
+      "entity_type": "payment_amount",
+      "value": "1.00 USD",
+      "raw_text": "$1",
+      "segment_id": 28,
+      "start_time": 206.615,
+      "confidence": 0.95
+    },
+    {
+      "entity_type": "due_date",
+      "value": "2020",
+      "raw_text": "2020",
+      "segment_id": 0,
+      "start_time": 0.031,
+      "confidence": 0.75
+    },
+    {
+      "entity_type": "due_date",
+      "value": "the third quarter",
+      "raw_text": "the third quarter",
+      "segment_id": 1,
+      "start_time": 9.604,
+      "confidence": 0.75
+    },
+    {
+      "entity_type": "due_date",
+      "value": "last quarter",
+      "raw_text": "last quarter",
+      "segment_id": 3,
+      "start_time": 30.423,
+      "confidence": 0.75
+    },
+    {
+      "entity_type": "organization",
+      "value": "ISRS",
+      "raw_text": "ISRS",
+      "segment_id": 3,
+      "start_time": 30.423,
+      "confidence": 0.75
+    },
+    {
+      "entity_type": "due_date",
+      "value": "January",
+      "raw_text": "January",
+      "segment_id": 6,
+      "start_time": 63.497,
+      "confidence": 0.75
+    },
+    {
+      "entity_type": "organization",
+      "value": "House",
+      "raw_text": "House",
+      "segment_id": 6,
+      "start_time": 63.497,
+      "confidence": 0.75
+    },
+    {
+      "entity_type": "organization",
+      "value": "Senate",
+      "raw_text": "Senate",
+      "segment_id": 7,
+      "start_time": 75.691,
+      "confidence": 0.75
+    },
+    {
+      "entity_type": "due_date",
+      "value": "early March",
+      "raw_text": "early March",
+      "segment_id": 7,
+      "start_time": 75.691,
+      "confidence": 0.75
+    },
+    {
+      "entity_type": "due_date",
+      "value": "May 6th",
+      "raw_text": "May 6th",
+      "segment_id": 8,
+      "start_time": 78.274,
+      "confidence": 0.75
+    },
+    {
+      "entity_type": "organization",
+      "value": "House",
+      "raw_text": "House",
+      "segment_id": 8,
+      "start_time": 78.274,
+      "confidence": 0.75
+    },
+    {
+      "entity_type": "organization",
+      "value": "Conference Committee",
+      "raw_text": "Conference Committee",
+      "segment_id": 9,
+      "start_time": 82.099,
+      "confidence": 0.75
+    },
+    {
+      "entity_type": "organization",
+      "value": "ISRIS",
+      "raw_text": "ISRIS",
+      "segment_id": 10,
+      "start_time": 89.958,
+      "confidence": 0.75
+    },
+    {
+      "entity_type": "due_date",
+      "value": "early February",
+      "raw_text": "early February",
+      "segment_id": 10,
+      "start_time": 89.958,
+      "confidence": 0.75
+    },
+    {
+      "entity_type": "due_date",
+      "value": "Late last month",
+      "raw_text": "Late last month",
+      "segment_id": 11,
+      "start_time": 95.184,
+      "confidence": 0.75
+    },
+    {
+      "entity_type": "organization",
+      "value": "the Missouri Public Service Commission",
+      "raw_text": "the Missouri Public Service Commission",
+      "segment_id": 11,
+      "start_time": 95.184,
+      "confidence": 0.75
+    },
+    {
+      "entity_type": "organization",
+      "value": "the Missouri Public Service Commission",
+      "raw_text": "the Missouri Public Service Commission",
+      "segment_id": 12,
+      "start_time": 110.922,
+      "confidence": 0.75
+    },
+    {
+      "entity_type": "organization",
+      "value": "the Missouri Supreme Court",
+      "raw_text": "the Missouri Supreme Court",
+      "segment_id": 13,
+      "start_time": 119.86,
+      "confidence": 0.75
+    },
+    {
+      "entity_type": "due_date",
+      "value": "mid-March",
+      "raw_text": "mid-March",
+      "segment_id": 13,
+      "start_time": 119.86,
+      "confidence": 0.75
+    },
+    {
+      "entity_type": "organization",
+      "value": "Commission",
+      "raw_text": "Commission",
+      "segment_id": 14,
+      "start_time": 123.344,
+      "confidence": 0.75
+    },
+    {
+      "entity_type": "due_date",
+      "value": "120 days",
+      "raw_text": "120 days",
+      "segment_id": 14,
+      "start_time": 123.344,
+      "confidence": 0.75
+    },
+    {
+      "entity_type": "organization",
+      "value": "ISRIS",
+      "raw_text": "ISRIS",
+      "segment_id": 15,
+      "start_time": 130.452,
+      "confidence": 0.75
+    },
+    {
+      "entity_type": "due_date",
+      "value": "December 1st",
+      "raw_text": "December 1st",
+      "segment_id": 16,
+      "start_time": 135.799,
+      "confidence": 0.75
+    },
+    {
+      "entity_type": "organization",
+      "value": "the Accelerated Infrastructure Modernization Rider",
+      "raw_text": "the Accelerated Infrastructure Modernization Rider",
+      "segment_id": 17,
+      "start_time": 142.647,
+      "confidence": 0.75
+    },
+    {
+      "entity_type": "due_date",
+      "value": "this year",
+      "raw_text": "this year",
+      "segment_id": 18,
+      "start_time": 148.193,
+      "confidence": 0.75
+    },
+    {
+      "entity_type": "organization",
+      "value": "ROE",
+      "raw_text": "ROE",
+      "segment_id": 18,
+      "start_time": 148.193,
+      "confidence": 0.75
+    },
+    {
+      "entity_type": "person_name",
+      "value": "Steve Rasche",
+      "raw_text": "Steve Rasche",
+      "segment_id": 19,
+      "start_time": 157.244,
+      "confidence": 0.75
+    },
+    {
+      "entity_type": "due_date",
+      "value": "quarterly",
+      "raw_text": "quarterly",
+      "segment_id": 23,
+      "start_time": 173.062,
+      "confidence": 0.75
+    },
+    {
+      "entity_type": "due_date",
+      "value": "the second half of our fiscal 2020",
+      "raw_text": "the second half of our fiscal 2020",
+      "segment_id": 24,
+      "start_time": 177.488,
+      "confidence": 0.75
+    },
+    {
+      "entity_type": "due_date",
+      "value": "the quarter",
+      "raw_text": "the quarter",
+      "segment_id": 25,
+      "start_time": 180.492,
+      "confidence": 0.75
+    },
+    {
+      "entity_type": "due_date",
+      "value": "last year",
+      "raw_text": "last year",
+      "segment_id": 26,
+      "start_time": 192.409,
+      "confidence": 0.75
+    },
+    {
+      "entity_type": "due_date",
+      "value": "last year",
+      "raw_text": "last year",
+      "segment_id": 28,
+      "start_time": 206.615,
+      "confidence": 0.75
+    },
+    {
+      "entity_type": "organization",
+      "value": "Spire STL",
+      "raw_text": "Spire STL",
+      "segment_id": 29,
+      "start_time": 216.144,
+      "confidence": 0.75
+    },
+    {
+      "entity_type": "due_date",
+      "value": "last quarter",
+      "raw_text": "last quarter",
+      "segment_id": 29,
+      "start_time": 216.144,
+      "confidence": 0.75
+    },
+    {
+      "entity_type": "due_date",
+      "value": "current year",
+      "raw_text": "current year",
+      "segment_id": 30,
+      "start_time": 230.257,
+      "confidence": 0.75
+    }
+  ],
+  "obligations": [],
+  "compliance_checks": [
+    {
+      "check_name": "caller_identification",
+      "passed": false,
+      "violation_type": "missing_disclosure",
+      "evidence_text": " of our 2020 spend will be on our gas utilities, with two-thirds of the increase, or about $20 million, attributable to utility investment. we also plan to invest $10 million in the third quarter at s",
+      "segment_id": null,
+      "regulation": "RBI_Fair_Practice_Code_Section_4",
+      "severity": "high"
+    },
+    {
+      "check_name": "recording_consent",
+      "passed": false,
+      "violation_type": "missing_disclosure",
+      "evidence_text": " of our 2020 spend will be on our gas utilities, with two-thirds of the increase, or about $20 million, attributable to utility investment. we also plan to invest $10 million in the third quarter at s",
+      "segment_id": null,
+      "regulation": "IT_Act_2000_Section_43A",
+      "severity": "high"
+    }
+  ],
+  "fraud_signals": [],
+  "pii_entities": [
+    {
+      "entity_type": "DATE_TIME",
+      "text": "2020",
+      "masked_text": "[DATE_TIME]",
+      "start": 8,
+      "end": 12,
+      "score": 0.85,
+      "segment_id": 0
+    },
+    {
+      "entity_type": "DATE_TIME",
+      "text": "the third quarter",
+      "masked_text": "[DATE_TIME]",
+      "start": 38,
+      "end": 55,
+      "score": 0.85,
+      "segment_id": 1
+    },
+    {
+      "entity_type": "LOCATION",
+      "text": "Spire Store",
+      "masked_text": "[LOCATION]",
+      "start": 59,
+      "end": 70,
+      "score": 0.85,
+      "segment_id": 1
+    },
+    {
+      "entity_type": "LOCATION",
+      "text": "Missouri",
+      "masked_text": "[LOCATION]",
+      "start": 85,
+      "end": 93,
+      "score": 0.85,
+      "segment_id": 2
+    },
+    {
+      "entity_type": "LOCATION",
+      "text": "Alabama",
+      "masked_text": "[LOCATION]",
+      "start": 98,
+      "end": 105,
+      "score": 0.85,
+      "segment_id": 2
+    },
+    {
+      "entity_type": "DATE_TIME",
+      "text": "last quarter",
+      "masked_text": "[DATE_TIME]",
+      "start": 33,
+      "end": 45,
+      "score": 0.85,
+      "segment_id": 3
+    },
+    {
+      "entity_type": "LOCATION",
+      "text": "Missouri",
+      "masked_text": "[LOCATION]",
+      "start": 50,
+      "end": 58,
+      "score": 0.85,
+      "segment_id": 3
+    },
+    {
+      "entity_type": "DATE_TIME",
+      "text": "2016",
+      "masked_text": "[DATE_TIME]",
+      "start": 176,
+      "end": 180,
+      "score": 0.85,
+      "segment_id": 3
+    },
+    {
+      "entity_type": "DATE_TIME",
+      "text": "late last year",
+      "masked_text": "[DATE_TIME]",
+      "start": 300,
+      "end": 314,
+      "score": 0.85,
+      "segment_id": 3
+    },
+    {
+      "entity_type": "LOCATION",
+      "text": "Missouri",
+      "masked_text": "[LOCATION]",
+      "start": 17,
+      "end": 25,
+      "score": 0.85,
+      "segment_id": 6
+    },
+    {
+      "entity_type": "DATE_TIME",
+      "text": "January",
+      "masked_text": "[DATE_TIME]",
+      "start": 49,
+      "end": 56,
+      "score": 0.85,
+      "segment_id": 6
+    },
+    {
+      "entity_type": "DATE_TIME",
+      "text": "early March",
+      "masked_text": "[DATE_TIME]",
+      "start": 23,
+      "end": 34,
+      "score": 0.85,
+      "segment_id": 7
+    },
+    {
+      "entity_type": "DATE_TIME",
+      "text": "May 6th",
+      "masked_text": "[DATE_TIME]",
+      "start": 3,
+      "end": 10,
+      "score": 0.85,
+      "segment_id": 8
+    },
+    {
+      "entity_type": "DATE_TIME",
+      "text": "early February",
+      "masked_text": "[DATE_TIME]",
+      "start": 75,
+      "end": 89,
+      "score": 0.85,
+      "segment_id": 10
+    },
+    {
+      "entity_type": "DATE_TIME",
+      "text": "Late last month",
+      "masked_text": "[DATE_TIME]",
+      "start": 0,
+      "end": 15,
+      "score": 0.85,
+      "segment_id": 11
+    },
+    {
+      "entity_type": "DATE_TIME",
+      "text": "mid-March",
+      "masked_text": "[DATE_TIME]",
+      "start": 42,
+      "end": 51,
+      "score": 0.85,
+      "segment_id": 13
+    },
+    {
+      "entity_type": "DATE_TIME",
+      "text": "120 days",
+      "masked_text": "[DATE_TIME]",
+      "start": 19,
+      "end": 27,
+      "score": 0.85,
+      "segment_id": 14
+    },
+    {
+      "entity_type": "DATE_TIME",
+      "text": "the middle of July",
+      "masked_text": "[DATE_TIME]",
+      "start": 37,
+      "end": 55,
+      "score": 0.85,
+      "segment_id": 14
+    },
+    {
+      "entity_type": "DATE_TIME",
+      "text": "today",
+      "masked_text": "[DATE_TIME]",
+      "start": 124,
+      "end": 129,
+      "score": 0.85,
+      "segment_id": 15
+    },
+    {
+      "entity_type": "LOCATION",
+      "text": "Alabama",
+      "masked_text": "[LOCATION]",
+      "start": 12,
+      "end": 19,
+      "score": 0.85,
+      "segment_id": 16
+    },
+    {
+      "entity_type": "DATE_TIME",
+      "text": "December 1st",
+      "masked_text": "[DATE_TIME]",
+      "start": 119,
+      "end": 131,
+      "score": 0.85,
+      "segment_id": 16
+    },
+    {
+      "entity_type": "DATE_TIME",
+      "text": "this year",
+      "masked_text": "[DATE_TIME]",
+      "start": 68,
+      "end": 77,
+      "score": 0.85,
+      "segment_id": 18
+    },
+    {
+      "entity_type": "DATE_TIME",
+      "text": "2021",
+      "masked_text": "[DATE_TIME]",
+      "start": 119,
+      "end": 123,
+      "score": 0.85,
+      "segment_id": 18
+    },
+    {
+      "entity_type": "DATE_TIME",
+      "text": "this past year",
+      "masked_text": "[DATE_TIME]",
+      "start": 142,
+      "end": 156,
+      "score": 0.85,
+      "segment_id": 18
+    },
+    {
+      "entity_type": "PERSON",
+      "text": "Steve Rasche",
+      "masked_text": "[PERSON]",
+      "start": 38,
+      "end": 50,
+      "score": 0.85,
+      "segment_id": 19
+    },
+    {
+      "entity_type": "DATE_TIME",
+      "text": "morning",
+      "masked_text": "[DATE_TIME]",
+      "start": 5,
+      "end": 12,
+      "score": 0.85,
+      "segment_id": 21
+    },
+    {
+      "entity_type": "DATE_TIME",
+      "text": "every day",
+      "masked_text": "[DATE_TIME]",
+      "start": 120,
+      "end": 129,
+      "score": 0.85,
+      "segment_id": 22
+    },
+    {
+      "entity_type": "DATE_TIME",
+      "text": "quarterly",
+      "masked_text": "[DATE_TIME]",
+      "start": 17,
+      "end": 26,
+      "score": 0.85,
+      "segment_id": 23
+    },
+    {
+      "entity_type": "DATE_TIME",
+      "text": "the second half of our fiscal 2020",
+      "masked_text": "[DATE_TIME]",
+      "start": 34,
+      "end": 68,
+      "score": 0.85,
+      "segment_id": 24
+    },
+    {
+      "entity_type": "DATE_TIME",
+      "text": "the quarter",
+      "masked_text": "[DATE_TIME]",
+      "start": 27,
+      "end": 38,
+      "score": 0.85,
+      "segment_id": 25
+    },
+    {
+      "entity_type": "DATE_TIME",
+      "text": "last year",
+      "masked_text": "[DATE_TIME]",
+      "start": 128,
+      "end": 137,
+      "score": 0.85,
+      "segment_id": 25
+    },
+    {
+      "entity_type": "DATE_TIME",
+      "text": "last year",
+      "masked_text": "[DATE_TIME]",
+      "start": 82,
+      "end": 91,
+      "score": 0.85,
+      "segment_id": 26
+    },
+    {
+      "entity_type": "DATE_TIME",
+      "text": "last year",
+      "masked_text": "[DATE_TIME]",
+      "start": 32,
+      "end": 41,
+      "score": 0.85,
+      "segment_id": 28
+    },
+    {
+      "entity_type": "DATE_TIME",
+      "text": "last quarter",
+      "masked_text": "[DATE_TIME]",
+      "start": 78,
+      "end": 90,
+      "score": 0.85,
+      "segment_id": 29
+    },
+    {
+      "entity_type": "LOCATION",
+      "text": "Spire",
+      "masked_text": "[LOCATION]",
+      "start": 110,
+      "end": 115,
+      "score": 0.85,
+      "segment_id": 29
+    },
+    {
+      "entity_type": "DATE_TIME",
+      "text": "year",
+      "masked_text": "[DATE_TIME]",
+      "start": 42,
+      "end": 46,
+      "score": 0.85,
+      "segment_id": 30
+    }
+  ],
+  "pii_count": 36,
+  "toxicity_flags": [],
+  "tamper_signals": [
+    {
+      "signal_type": "silence_anomaly",
+      "description": "Digital silence (perfect zero) at 13.2s (96ms). Natural recordings always have background noise.",
+      "timestamp": 13.15,
+      "confidence": 0.85,
+      "severity": "high"
+    },
+    {
+      "signal_type": "silence_anomaly",
+      "description": "Digital silence (perfect zero) at 135.6s (96ms). Natural recordings always have background noise.",
+      "timestamp": 135.65,
+      "confidence": 0.85,
+      "severity": "high"
+    },
+    {
+      "signal_type": "silence_anomaly",
+      "description": "Digital silence (perfect zero) at 160.8s (96ms). Natural recordings always have background noise.",
+      "timestamp": 160.77,
+      "confidence": 0.85,
+      "severity": "high"
+    },
+    {
+      "signal_type": "noise_floor_inconsistency",
+      "description": "Background noise level changes significantly at 10s (deviation=3.7x). Different noise floors suggest audio from different sources.",
+      "timestamp": 10.0,
+      "confidence": 0.74,
+      "severity": "medium"
+    },
+    {
+      "signal_type": "noise_floor_inconsistency",
+      "description": "Background noise level changes significantly at 12s (deviation=3.7x). Different noise floors suggest audio from different sources.",
+      "timestamp": 12.0,
+      "confidence": 0.747,
+      "severity": "medium"
+    },
+    {
+      "signal_type": "noise_floor_inconsistency",
+      "description": "Background noise level changes significantly at 114s (deviation=4.0x). Different noise floors suggest audio from different sources.",
+      "timestamp": 114.0,
+      "confidence": 0.8,
+      "severity": "medium"
+    },
+    {
+      "signal_type": "noise_floor_inconsistency",
+      "description": "Background noise level changes significantly at 124s (deviation=3.8x). Different noise floors suggest audio from different sources.",
+      "timestamp": 124.0,
+      "confidence": 0.77,
+      "severity": "medium"
+    },
+    {
+      "signal_type": "noise_floor_inconsistency",
+      "description": "Background noise level changes significantly at 132s (deviation=3.3x). Different noise floors suggest audio from different sources.",
+      "timestamp": 132.0,
+      "confidence": 0.658,
+      "severity": "medium"
+    },
+    {
+      "signal_type": "noise_floor_inconsistency",
+      "description": "Background noise level changes significantly at 136s (deviation=4.1x). Different noise floors suggest audio from different sources.",
+      "timestamp": 136.0,
+      "confidence": 0.8,
+      "severity": "medium"
+    }
+  ],
+  "tamper_risk": "high",
+  "cleanup_metadata": {
+    "output_path": "data/transcripts/cc2e45e6_cleaned.wav",
+    "original_duration": 240.0,
+    "cleaned_duration": 233.48,
+    "dead_air_removed_sec": 6.52,
+    "hold_music_detected": false,
+    "hold_music_removed_sec": 0,
+    "segments_stitched": 4,
+    "cleanup_applied": true
+  },
+  "segment_emotions": [
+    {
+      "segment_id": 0,
+      "speaker": "agent",
+      "emotion": "happy",
+      "emotion_score": 0.814,
+      "all_scores": {
+        "angry": 0.0,
+        "disgusted": 0.024,
+        "fearful": 0.002,
+        "happy": 0.814,
+        "neutral": 0.089,
+        "other": 0.002,
+        "sad": 0.001,
+        "surprised": 0.001,
+        "<unk>": 0.067
+      }
+    },
+    {
+      "segment_id": 1,
+      "speaker": "agent",
+      "emotion": "neutral",
+      "emotion_score": 0.997,
+      "all_scores": {
+        "angry": 0.0,
+        "disgusted": 0.0,
+        "fearful": 0.0,
+        "happy": 0.0,
+        "neutral": 0.997,
+        "other": 0.0,
+        "sad": 0.0,
+        "surprised": 0.0,
+        "<unk>": 0.003
+      }
+    },
+    {
+      "segment_id": 2,
+      "speaker": "agent",
+      "emotion": "neutral",
+      "emotion_score": 0.991,
+      "all_scores": {
+        "angry": 0.0,
+        "disgusted": 0.0,
+        "fearful": 0.0,
+        "happy": 0.008,
+        "neutral": 0.991,
+        "other": 0.0,
+        "sad": 0.0,
+        "surprised": 0.0,
+        "<unk>": 0.0
+      }
+    },
+    {
+      "segment_id": 3,
+      "speaker": "agent",
+      "emotion": "happy",
+      "emotion_score": 0.499,
+      "all_scores": {
+        "angry": 0.0,
+        "disgusted": 0.003,
+        "fearful": 0.002,
+        "happy": 0.499,
+        "neutral": 0.223,
+        "other": 0.0,
+        "sad": 0.059,
+        "surprised": 0.002,
+        "<unk>": 0.211
+      }
+    },
+    {
+      "segment_id": 4,
+      "speaker": "agent",
+      "emotion": "neutral",
+      "emotion_score": 0.888,
+      "all_scores": {
+        "angry": 0.0,
+        "disgusted": 0.0,
+        "fearful": 0.001,
+        "happy": 0.09,
+        "neutral": 0.888,
+        "other": 0.002,
+        "sad": 0.001,
+        "surprised": 0.0,
+        "<unk>": 0.018
+      }
+    },
+    {
+      "segment_id": 5,
+      "speaker": "agent",
+      "emotion": "neutral",
+      "emotion_score": 0.688,
+      "all_scores": {
+        "angry": 0.0,
+        "disgusted": 0.002,
+        "fearful": 0.025,
+        "happy": 0.006,
+        "neutral": 0.688,
+        "other": 0.035,
+        "sad": 0.007,
+        "surprised": 0.0,
+        "<unk>": 0.238
+      }
+    },
+    {
+      "segment_id": 6,
+      "speaker": "agent",
+      "emotion": "neutral",
+      "emotion_score": 1.0,
+      "all_scores": {
+        "angry": 0.0,
+        "disgusted": 0.0,
+        "fearful": 0.0,
+        "happy": 0.0,
+        "neutral": 1.0,
+        "other": 0.0,
+        "sad": 0.0,
+        "surprised": 0.0,
+        "<unk>": 0.0
+      }
+    },
+    {
+      "segment_id": 7,
+      "speaker": "agent",
+      "emotion": "neutral",
+      "emotion_score": 1.0,
+      "all_scores": {
+        "angry": 0.0,
+        "disgusted": 0.0,
+        "fearful": 0.0,
+        "happy": 0.0,
+        "neutral": 1.0,
+        "other": 0.0,
+        "sad": 0.0,
+        "surprised": 0.0,
+        "<unk>": 0.0
+      }
+    },
+    {
+      "segment_id": 8,
+      "speaker": "agent",
+      "emotion": "<unk>",
+      "emotion_score": 0.626,
+      "all_scores": {
+        "angry": 0.02,
+        "disgusted": 0.017,
+        "fearful": 0.003,
+        "happy": 0.009,
+        "neutral": 0.282,
+        "other": 0.001,
+        "sad": 0.034,
+        "surprised": 0.006,
+        "<unk>": 0.626
+      }
+    },
+    {
+      "segment_id": 9,
+      "speaker": "agent",
+      "emotion": "neutral",
+      "emotion_score": 1.0,
+      "all_scores": {
+        "angry": 0.0,
+        "disgusted": 0.0,
+        "fearful": 0.0,
+        "happy": 0.0,
+        "neutral": 1.0,
+        "other": 0.0,
+        "sad": 0.0,
+        "surprised": 0.0,
+        "<unk>": 0.0
+      }
+    },
+    {
+      "segment_id": 10,
+      "speaker": "agent",
+      "emotion": "<unk>",
+      "emotion_score": 0.756,
+      "all_scores": {
+        "angry": 0.0,
+        "disgusted": 0.005,
+        "fearful": 0.0,
+        "happy": 0.224,
+        "neutral": 0.001,
+        "other": 0.014,
+        "sad": 0.0,
+        "surprised": 0.0,
+        "<unk>": 0.756
+      }
+    },
+    {
+      "segment_id": 11,
+      "speaker": "agent",
+      "emotion": "neutral",
+      "emotion_score": 0.916,
+      "all_scores": {
+        "angry": 0.001,
+        "disgusted": 0.001,
+        "fearful": 0.0,
+        "happy": 0.024,
+        "neutral": 0.916,
+        "other": 0.0,
+        "sad": 0.058,
+        "surprised": 0.0,
+        "<unk>": 0.0
+      }
+    },
+    {
+      "segment_id": 12,
+      "speaker": "agent",
+      "emotion": "neutral",
+      "emotion_score": 1.0,
+      "all_scores": {
+        "angry": 0.0,
+        "disgusted": 0.0,
+        "fearful": 0.0,
+        "happy": 0.0,
+        "neutral": 1.0,
+        "other": 0.0,
+        "sad": 0.0,
+        "surprised": 0.0,
+        "<unk>": 0.0
+      }
+    },
+    {
+      "segment_id": 13,
+      "speaker": "agent",
+      "emotion": "neutral",
+      "emotion_score": 1.0,
+      "all_scores": {
+        "angry": 0.0,
+        "disgusted": 0.0,
+        "fearful": 0.0,
+        "happy": 0.0,
+        "neutral": 1.0,
+        "other": 0.0,
+        "sad": 0.0,
+        "surprised": 0.0,
+        "<unk>": 0.0
+      }
+    },
+    {
+      "segment_id": 14,
+      "speaker": "agent",
+      "emotion": "neutral",
+      "emotion_score": 1.0,
+      "all_scores": {
+        "angry": 0.0,
+        "disgusted": 0.0,
+        "fearful": 0.0,
+        "happy": 0.0,
+        "neutral": 1.0,
+        "other": 0.0,
+        "sad": 0.0,
+        "surprised": 0.0,
+        "<unk>": 0.0
+      }
+    },
+    {
+      "segment_id": 15,
+      "speaker": "agent",
+      "emotion": "neutral",
+      "emotion_score": 1.0,
+      "all_scores": {
+        "angry": 0.0,
+        "disgusted": 0.0,
+        "fearful": 0.0,
+        "happy": 0.0,
+        "neutral": 1.0,
+        "other": 0.0,
+        "sad": 0.0,
+        "surprised": 0.0,
+        "<unk>": 0.0
+      }
+    },
+    {
+      "segment_id": 16,
+      "speaker": "agent",
+      "emotion": "happy",
+      "emotion_score": 0.604,
+      "all_scores": {
+        "angry": 0.001,
+        "disgusted": 0.011,
+        "fearful": 0.003,
+        "happy": 0.604,
+        "neutral": 0.303,
+        "other": 0.001,
+        "sad": 0.022,
+        "surprised": 0.004,
+        "<unk>": 0.052
+      }
+    },
+    {
+      "segment_id": 17,
+      "speaker": "agent",
+      "emotion": "neutral",
+      "emotion_score": 0.999,
+      "all_scores": {
+        "angry": 0.0,
+        "disgusted": 0.0,
+        "fearful": 0.0,
+        "happy": 0.001,
+        "neutral": 0.999,
+        "other": 0.0,
+        "sad": 0.0,
+        "surprised": 0.0,
+        "<unk>": 0.0
+      }
+    },
+    {
+      "segment_id": 18,
+      "speaker": "agent",
+      "emotion": "neutral",
+      "emotion_score": 0.996,
+      "all_scores": {
+        "angry": 0.0,
+        "disgusted": 0.0,
+        "fearful": 0.0,
+        "happy": 0.001,
+        "neutral": 0.996,
+        "other": 0.0,
+        "sad": 0.0,
+        "surprised": 0.0,
+        "<unk>": 0.003
+      }
+    },
+    {
+      "segment_id": 19,
+      "speaker": "agent",
+      "emotion": "neutral",
+      "emotion_score": 0.881,
+      "all_scores": {
+        "angry": 0.0,
+        "disgusted": 0.002,
+        "fearful": 0.0,
+        "happy": 0.033,
+        "neutral": 0.881,
+        "other": 0.0,
+        "sad": 0.083,
+        "surprised": 0.001,
+        "<unk>": 0.0
+      }
+    },
+    {
+      "segment_id": 20,
+      "speaker": "customer",
+      "emotion": "neutral",
+      "emotion_score": 0.978,
+      "all_scores": {
+        "angry": 0.0,
+        "disgusted": 0.002,
+        "fearful": 0.001,
+        "happy": 0.016,
+        "neutral": 0.978,
+        "other": 0.0,
+        "sad": 0.002,
+        "surprised": 0.001,
+        "<unk>": 0.0
+      }
+    },
+    {
+      "segment_id": 21,
+      "speaker": "customer",
+      "emotion": "neutral",
+      "emotion_score": 0.877,
+      "all_scores": {
+        "angry": 0.013,
+        "disgusted": 0.001,
+        "fearful": 0.001,
+        "happy": 0.049,
+        "neutral": 0.877,
+        "other": 0.001,
+        "sad": 0.058,
+        "surprised": 0.001,
+        "<unk>": 0.0
+      }
+    },
+    {
+      "segment_id": 22,
+      "speaker": "customer",
+      "emotion": "happy",
+      "emotion_score": 0.921,
+      "all_scores": {
+        "angry": 0.0,
+        "disgusted": 0.0,
+        "fearful": 0.0,
+        "happy": 0.921,
+        "neutral": 0.001,
+        "other": 0.0,
+        "sad": 0.0,
+        "surprised": 0.0,
+        "<unk>": 0.077
+      }
+    },
+    {
+      "segment_id": 23,
+      "speaker": "customer",
+      "emotion": "neutral",
+      "emotion_score": 0.969,
+      "all_scores": {
+        "angry": 0.0,
+        "disgusted": 0.0,
+        "fearful": 0.0,
+        "happy": 0.001,
+        "neutral": 0.969,
+        "other": 0.0,
+        "sad": 0.0,
+        "surprised": 0.0,
+        "<unk>": 0.028
+      }
+    },
+    {
+      "segment_id": 24,
+      "speaker": "customer",
+      "emotion": "neutral",
+      "emotion_score": 0.957,
+      "all_scores": {
+        "angry": 0.001,
+        "disgusted": 0.004,
+        "fearful": 0.0,
+        "happy": 0.007,
+        "neutral": 0.957,
+        "other": 0.0,
+        "sad": 0.001,
+        "surprised": 0.001,
+        "<unk>": 0.028
+      }
+    },
+    {
+      "segment_id": 25,
+      "speaker": "customer",
+      "emotion": "neutral",
+      "emotion_score": 0.719,
+      "all_scores": {
+        "angry": 0.002,
+        "disgusted": 0.003,
+        "fearful": 0.009,
+        "happy": 0.03,
+        "neutral": 0.719,
+        "other": 0.004,
+        "sad": 0.008,
+        "surprised": 0.001,
+        "<unk>": 0.224
+      }
+    },
+    {
+      "segment_id": 26,
+      "speaker": "customer",
+      "emotion": "<unk>",
+      "emotion_score": 0.822,
+      "all_scores": {
+        "angry": 0.0,
+        "disgusted": 0.048,
+        "fearful": 0.004,
+        "happy": 0.085,
+        "neutral": 0.037,
+        "other": 0.002,
+        "sad": 0.001,
+        "surprised": 0.001,
+        "<unk>": 0.822
+      }
+    },
+    {
+      "segment_id": 27,
+      "speaker": "customer",
+      "emotion": "<unk>",
+      "emotion_score": 0.665,
+      "all_scores": {
+        "angry": 0.001,
+        "disgusted": 0.023,
+        "fearful": 0.002,
+        "happy": 0.002,
+        "neutral": 0.302,
+        "other": 0.0,
+        "sad": 0.002,
+        "surprised": 0.002,
+        "<unk>": 0.665
+      }
+    },
+    {
+      "segment_id": 28,
+      "speaker": "customer",
+      "emotion": "<unk>",
+      "emotion_score": 0.899,
+      "all_scores": {
+        "angry": 0.0,
+        "disgusted": 0.002,
+        "fearful": 0.001,
+        "happy": 0.001,
+        "neutral": 0.097,
+        "other": 0.0,
+        "sad": 0.0,
+        "surprised": 0.0,
+        "<unk>": 0.899
+      }
+    },
+    {
+      "segment_id": 29,
+      "speaker": "customer",
+      "emotion": "neutral",
+      "emotion_score": 1.0,
+      "all_scores": {
+        "angry": 0.0,
+        "disgusted": 0.0,
+        "fearful": 0.0,
+        "happy": 0.0,
+        "neutral": 1.0,
+        "other": 0.0,
+        "sad": 0.0,
+        "surprised": 0.0,
+        "<unk>": 0.0
+      }
+    },
+    {
+      "segment_id": 30,
+      "speaker": "customer",
+      "emotion": "neutral",
+      "emotion_score": 0.949,
+      "all_scores": {
+        "angry": 0.002,
+        "disgusted": 0.005,
+        "fearful": 0.001,
+        "happy": 0.002,
+        "neutral": 0.949,
+        "other": 0.0,
+        "sad": 0.001,
+        "surprised": 0.001,
+        "<unk>": 0.039
+      }
+    }
+  ],
+  "emotion_distribution": {
+    "happy": 0.129,
+    "neutral": 0.71,
+    "<unk>": 0.161
+  },
+  "detected_language": "en",
+  "language_segments": [],
+  "customer_sentiment_trajectory": [
+    0.02,
+    0.02,
+    0.02,
+    0.02,
+    0.02,
+    -0.998,
+    -0.998,
+    0.02,
+    -0.998,
+    0.998,
+    0.02
+  ],
+  "agent_sentiment_trajectory": [
+    0.02,
+    0.02,
+    0.98,
+    0.075,
+    0.836,
+    0.02,
+    0.02,
+    0.02,
+    0.02,
+    0.02,
+    0.02,
+    0.996,
+    0.02,
+    0.02,
+    0.02,
+    0.02,
+    0.02,
+    0.108,
+    0.02,
+    0.02
+  ],
+  "customer_emotion_dominant": "neutral",
+  "escalation_detected": false,
+  "overall_risk_level": "high",
+  "compliance_score": 70,
+  "requires_human_review": true,
+  "review_priority": 2,
+  "review_reasons": [
+    "caller_identification",
+    "recording_consent",
+    "low_confidence_transcript",
+    "tamper_risk",
+    "pii_detected_36"
+  ],
+  "pipeline_timings": {
+    "Stage 1: Normalize": 1.4,
+    "Stage 2: Quality": 6.3,
+    "Stage 2.5: Cleanup": 0.1,
+    "Stage 3: WhisperX": 96.9,
+    "Stage 4: Analysis (parallel)": 35.1,
+    "Stage 4I: LLM extraction": 37.4
+  },
+  "speaker_emotion_breakdown": {
+    "agent": {
+      "dominant": "neutral",
+      "distribution": {
+        "happy": 0.15,
+        "neutral": 0.75,
+        "<unk>": 0.1
+      },
+      "total_segments": 20
+    },
+    "customer": {
+      "dominant": "neutral",
+      "distribution": {
+        "neutral": 0.636,
+        "happy": 0.091,
+        "<unk>": 0.273
+      },
+      "total_segments": 11
+    }
+  },
+  "call_summary": "In this general call summary, it focuses on spending allocations for gas utilities and regulatory activities, with significant emphasis on two states\u2014Missouri and Alabama. Missouri's regulatory mechanisms are being utilized to accelerate infrastructure upgrades, which is crucial for timely recovery and better environmental performance reducing methane emissions. Meanwhile, in Alabama, they're pursuing opportunities under the Accelerated Infrastructure Modernization Rider (AIM), aiming for a ROE adder benefit for 2021 by reaching qualification thresholds.",
+  "key_outcomes": [
+    "Increased investment in gas utilities as part of overall spend.",
+    "Timely recovery and infrastructure modernization through regulatory mechanisms in Missouri.",
+    "Potential for 20% earnings growth via the AIM program in Alabama if goals are met."
+  ],
+  "next_actions": [
+    "Continued pursuit of regulatory changes to clarify fiscal eligibility for Spire Store upgrades.",
+    "Implementation of new sales programs including off-system sales and capacity release, starting on December 1st.",
+    "Ongoing filing ISRIS requests to recover revenue from ISRS cases that were challenged last year in Missouri.",
+    "Planning to achieve the AIM qualification thresholds for 2021."
+  ]
+}
