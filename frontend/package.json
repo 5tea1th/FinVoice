@@ -1,5 +1,5 @@
 {
-  "name": "finsight",
+  "name": "finvoice",
   "version": "0.1.0",
   "private": true,
   "scripts": {
@@ -11,7 +11,8 @@
     "lottie-react": "^2.4.1",
     "next": "^15.1.0",
     "react": "^19.0.0",
-    "react-dom": "^19.0.0"
+    "react-dom": "^19.0.0",
+    "recharts": "^3.7.0"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

@@ -48,8 +48,34 @@ export default function ReviewQueue() {
     );
   }
 
+  const highCount = items.filter(i => i.priority >= 7).length;
+  const medCount = items.filter(i => i.priority >= 4 && i.priority < 7).length;
+  const lowCount = items.filter(i => i.priority < 4).length;
+
   return (
     <>
+      {/* Summary strip */}
+      {items.length > 0 && (
+        <div className="call-stats-strip" style={{ marginBottom: 'var(--sp-4)' }}>
+          <div className="call-stat-chip">
+            <span className="call-stat-label">Total</span>
+            <span className="call-stat-value">{items.length}</span>
+          </div>
+          <div className="call-stat-chip">
+            <span className="call-stat-label">High</span>
+            <span className="call-stat-value" style={{ color: highCount > 0 ? 'var(--danger)' : undefined }}>{highCount}</span>
+          </div>
+          <div className="call-stat-chip">
+            <span className="call-stat-label">Medium</span>
+            <span className="call-stat-value" style={{ color: medCount > 0 ? 'var(--warning)' : undefined }}>{medCount}</span>
+          </div>
+          <div className="call-stat-chip">
+            <span className="call-stat-label">Low</span>
+            <span className="call-stat-value">{lowCount}</span>
+          </div>
+        </div>
+      )}
+
       <div className="review-filters">
         <select
           className="filter-select"
@@ -74,6 +100,9 @@ export default function ReviewQueue() {
           <option value="Low">Low</option>
           <option value="Critical">Critical</option>
         </select>
+        <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.75rem', color: 'var(--text-muted)', marginLeft: 'auto' }}>
+          {filtered.length} of {items.length} shown
+        </span>
       </div>
 
       <div className="review-list">
@@ -91,8 +120,11 @@ export default function ReviewQueue() {
             return (
               <div className="review-card" key={item.id} style={{ '--review-color': color } as React.CSSProperties}>
                 <div className="review-card-header" onClick={() => handleCardClick(item.id)} style={{ cursor: 'pointer' }}>
-                  <h4 style={{ fontFamily: 'var(--font-mono)' }}>{item.id} &middot; {item.riskType}</h4>
-                  <span className={`priority-score badge ${prioClass}`} style={{ fontFamily: 'var(--font-mono)' }}>Priority {item.priority}/10</span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-2)' }}>
+                    <h4 style={{ fontFamily: 'var(--font-mono)' }}>{item.id}</h4>
+                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.7rem', color: 'var(--text-muted)' }}>{item.riskType}</span>
+                  </div>
+                  <span className={`priority-score badge ${prioClass}`} style={{ fontFamily: 'var(--font-mono)' }}>P{item.priority}</span>
                 </div>
                 <p className="review-card-summary" onClick={() => handleCardClick(item.id)} style={{ cursor: 'pointer' }}>{item.summary}</p>
                 <div className="review-flags">
@@ -100,8 +132,8 @@ export default function ReviewQueue() {
                     <span className="review-flag" key={f} style={{ fontFamily: 'var(--font-mono)' }}>{f}</span>
                   ))}
                 </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 'var(--sp-2)' }}>
-                  <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{item.date} &middot; {item.agent}</span>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 'var(--sp-2)', position: 'relative' }}>
+                  <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>{item.date} &middot; {item.agent}</span>
                   <div className="review-actions">
                     <button
                       className="review-btn approve"
@@ -109,7 +141,7 @@ export default function ReviewQueue() {
                       disabled={actionInProgress !== null}
                       onClick={() => handleReviewAction(item.id, 'approve')}
                     >
-                      {actionInProgress === `${item.id}-approve` ? 'Approving...' : 'Approve'}
+                      {actionInProgress === `${item.id}-approve` ? '...' : 'Approve'}
                     </button>
                     <button
                       className="review-btn escalate"
@@ -117,7 +149,7 @@ export default function ReviewQueue() {
                       disabled={actionInProgress !== null}
                       onClick={() => handleReviewAction(item.id, 'escalate')}
                     >
-                      {actionInProgress === `${item.id}-escalate` ? 'Escalating...' : 'Escalate'}
+                      {actionInProgress === `${item.id}-escalate` ? '...' : 'Escalate'}
                     </button>
                     <button
                       className="review-btn reject"
@@ -125,7 +157,7 @@ export default function ReviewQueue() {
                       disabled={actionInProgress !== null}
                       onClick={() => handleReviewAction(item.id, 'reject')}
                     >
-                      {actionInProgress === `${item.id}-reject` ? 'Rejecting...' : 'Reject'}
+                      {actionInProgress === `${item.id}-reject` ? '...' : 'Reject'}
                     </button>
                   </div>
                 </div>

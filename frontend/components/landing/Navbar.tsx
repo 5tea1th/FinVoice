@@ -16,7 +16,7 @@ export default function Navbar() {
     <nav className={`nav${scrolled ? ' scrolled' : ''}`}>
       <div className="nav-inner container">
         <Link href="/" className="nav-logo">
-          FIN<span>SIGHT</span>
+          FIN<span>VOICE</span>
         </Link>
         <div className="nav-links">
           <a href="#pipeline" className="nav-link">Pipeline</a>

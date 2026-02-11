@@ -1,6 +1,8 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { getBackboardStatus, type BackboardStatus } from '@/lib/api';
 
 type View = 'overview' | 'upload' | 'calls' | 'review' | 'exports' | 'settings';
 
@@ -20,11 +22,17 @@ const NAV_ITEMS: { view: View; icon: string; label: string }[] = [
 ];
 
 export default function Sidebar({ activeView, onNavigate, open }: SidebarProps) {
+  const [bbStatus, setBbStatus] = useState<BackboardStatus | null>(null);
+
+  useEffect(() => {
+    getBackboardStatus().then(setBbStatus);
+  }, []);
+
   return (
     <aside className={`sidebar${open ? ' open' : ''}`}>
       <div className="sidebar-header">
         <Link href="/" className="sidebar-logo" style={{ fontFamily: 'var(--font-mono)' }}>
-          Fin<span>Sight</span>
+          Fin<span>Voice</span>
         </Link>
       </div>
 
@@ -43,10 +51,25 @@ export default function Sidebar({ activeView, onNavigate, open }: SidebarProps) 
       </nav>
 
       <div className="sidebar-footer">
-        <div className="sidebar-status">
+        <div className="sidebar-status" style={{ marginBottom: 'var(--sp-2)' }}>
           <span className="status-dot" />
           <span style={{ fontSize: '0.75rem', color: 'var(--text-dim)' }}>Pipeline active</span>
         </div>
+        {bbStatus && (
+          <div className="sidebar-status">
+            <span style={{
+              width: 8, height: 8, borderRadius: '50%',
+              background: bbStatus.configured ? 'var(--s5)' : 'var(--text-dim)',
+              display: 'inline-block', flexShrink: 0,
+              animation: bbStatus.configured ? 'pulse 2s ease-in-out infinite' : 'none',
+            }} />
+            <span style={{ fontSize: '0.7rem', color: 'var(--text-dim)', fontFamily: 'var(--font-mono)' }}>
+              {bbStatus.configured
+                ? `AI Memory (${bbStatus.calls_stored || 0})`
+                : 'AI Memory off'}
+            </span>
+          </div>
+        )}
       </div>
     </aside>
   );

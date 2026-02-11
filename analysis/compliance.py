@@ -179,6 +179,53 @@ def run_compliance_checks(
     duration_checks = _check_call_conduct(transcript_segments, call_type, lang=lang)
     checks.extend(duration_checks)
 
+    # General/earnings call checks — check for safe harbor, forward-looking disclaimers
+    if call_type == "general" and transcript_segments:
+        full_text = " ".join(s.get("text", "") for s in transcript_segments).lower()
+
+        # Safe harbor / forward-looking statement disclaimer
+        has_safe_harbor = any(
+            kw in full_text
+            for kw in ("forward-looking statement", "safe harbor", "actual results may differ",
+                        "not guarantee", "subject to risk", "sec filing")
+        )
+        checks.append(ComplianceCheck(
+            check_name="Forward-Looking Disclaimer",
+            passed=has_safe_harbor,
+            violation_type=None if has_safe_harbor else ComplianceViolationType.MISSING_DISCLOSURE,
+            evidence_text=None if has_safe_harbor else "No forward-looking statement disclaimer detected",
+            regulation="SEC_Regulation_FD",
+            severity="low",
+        ))
+
+        # Call recording disclosure
+        has_recording_notice = any(
+            kw in full_text
+            for kw in ("being recorded", "call is recorded", "recording", "webcast")
+        )
+        checks.append(ComplianceCheck(
+            check_name="Recording Disclosure",
+            passed=has_recording_notice,
+            violation_type=None if has_recording_notice else ComplianceViolationType.MISSING_DISCLOSURE,
+            evidence_text=None if has_recording_notice else "No recording/webcast notice detected",
+            regulation="General_Compliance",
+            severity="low",
+        ))
+
+        # Speaker identification
+        has_intro = any(
+            kw in full_text
+            for kw in ("my name is", "this is", "i'm ", "speaking today", "i am ")
+        )
+        checks.append(ComplianceCheck(
+            check_name="Speaker Identification",
+            passed=has_intro,
+            violation_type=None if has_intro else ComplianceViolationType.MISSING_DISCLOSURE,
+            evidence_text=None if has_intro else "No speaker introduction detected",
+            regulation="General_Compliance",
+            severity="low",
+        ))
+
     return checks
 
 

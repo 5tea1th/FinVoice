@@ -15,7 +15,7 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: 'FinSight',
+  title: 'FinVoice',
   description: 'Raw bank calls to structured, auditable, ML-trainable data',
 };
 

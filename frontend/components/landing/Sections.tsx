@@ -131,7 +131,7 @@ export function CTAFooter() {
           <div className="fade-up">
             <h2 className="section-title gradient-text">Ready to process your first call?</h2>
             <p className="section-desc" style={{ margin: '0 auto var(--sp-8)', fontStyle: 'italic' }}>
-              Upload an audio file and watch FinSight transform it into structured, auditable intelligence in real time.
+              Upload an audio file and watch FinVoice transform it into structured, auditable intelligence in real time.
             </p>
             <Link href="/dashboard" className="btn btn-primary btn-lg">
               Launch Dashboard &rarr;
@@ -142,7 +142,7 @@ export function CTAFooter() {
       <footer className="footer">
         <div className="container footer-inner">
           <span style={{ color: 'var(--text-muted)', fontSize: '0.875rem', letterSpacing: '0.1em', textTransform: 'uppercase' as const }}>
-            FIN<span style={{ color: 'var(--orange)' }}>SIGHT</span> &copy; 2024
+            FIN<span style={{ color: 'var(--orange)' }}>VOICE</span> &copy; 2025
           </span>
           <div className="footer-links">
             <a href="#" style={{ color: 'var(--text-muted)', fontSize: '0.875rem' }}>GitHub</a>

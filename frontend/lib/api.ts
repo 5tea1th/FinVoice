@@ -1,4 +1,4 @@
-// ===== FinSight API Layer =====
+// ===== FinVoice API Layer =====
 // Real backend integration — all functions fetch from FastAPI backend via Next.js proxy.
 
 // Resolve backend host once on client side — avoids SSR hydration mismatch
@@ -12,6 +12,26 @@ const API_BASE = getBackendBase() + '/api';
 const BACKEND_DIRECT = getBackendBase();
 
 // ===== TYPES =====
+
+export interface FinancialInsights {
+  key_metrics: { type: string; value: string; context: string; confidence?: number; segment_id?: number }[];
+  risk_factors: { type: string; detail: string }[];
+  recommendations: string[];
+  topic_sentiment: Record<string, number>;
+  call_effectiveness: {
+    total_segments: number;
+    total_speakers: number;
+    entities_extracted: number;
+    intents_classified: number;
+    unknown_rate: number;
+    disclosure_rate: number;
+    qa_rate: number;
+    total_words?: number;
+    avg_words_per_segment?: number;
+    speaker_balance?: number;
+  };
+  discussion_topics: { topic: string; mentions: number; percentage: number }[];
+}
 
 export interface AudioQualityComponents {
   snr: number;
@@ -45,6 +65,7 @@ export interface Call {
   numLowConfidenceSegments: number;
   keyOutcomes: string[];
   nextActions: string[];
+  financialInsights: FinancialInsights;
   numSpeakers: number;
   agentTalkPct: number;
   customerTalkPct: number;
@@ -90,6 +111,7 @@ export interface Intent {
   utterance: string;
   intent: string;
   confidence: number;
+  speaker: string;
 }
 
 export interface ComplianceRule {
@@ -109,6 +131,9 @@ export interface Stats {
   avgCompliance: number;
   fraudAlerts: number;
   pendingReviews: number;
+  riskDistribution: Record<string, number>;
+  languages: Record<string, number>;
+  totalDurationSeconds: number;
 }
 
 export interface ReviewItem {
@@ -235,6 +260,7 @@ export async function getCalls(): Promise<Call[]> {
       numLowConfidenceSegments: (c.num_low_confidence_segments as number) ?? 0,
       keyOutcomes: (c.key_outcomes as string[]) || [],
       nextActions: (c.next_actions as string[]) || [],
+      financialInsights: (c.financial_insights as FinancialInsights) || { key_metrics: [], risk_factors: [], recommendations: [], topic_sentiment: {}, call_effectiveness: { total_segments: 0, total_speakers: 0, entities_extracted: 0, intents_classified: 0, unknown_rate: 0, disclosure_rate: 0, qa_rate: 0 }, discussion_topics: [] },
       numSpeakers: (c.num_speakers as number) || 2,
       agentTalkPct: (c.agent_talk_percentage as number) ?? 0,
       customerTalkPct: (c.customer_talk_percentage as number) ?? 0,
@@ -275,6 +301,7 @@ export async function getCallById(id: string): Promise<Call | null> {
       numLowConfidenceSegments: c.num_low_confidence_segments ?? 0,
       keyOutcomes: (c.key_outcomes as string[]) || [],
       nextActions: (c.next_actions as string[]) || [],
+      financialInsights: (c.financial_insights as FinancialInsights) || { key_metrics: [], risk_factors: [], recommendations: [], topic_sentiment: {}, call_effectiveness: { total_segments: 0, total_speakers: 0, entities_extracted: 0, intents_classified: 0, unknown_rate: 0, disclosure_rate: 0, qa_rate: 0 }, discussion_topics: [] },
       numSpeakers: (c.num_speakers as number) || 2,
       agentTalkPct: c.agent_talk_percentage ?? 0,
       customerTalkPct: c.customer_talk_percentage ?? 0,
@@ -380,6 +407,7 @@ export async function getIntents(callId: string): Promise<Intent[]> {
       utterance: (i.text as string) || '',
       intent: (i.intent as string) || (i.label as string) || 'unknown',
       confidence: (i.confidence as number) ?? 0,
+      speaker: (i.speaker as string) || 'unknown',
     }));
   } catch {
     return [];
@@ -436,9 +464,10 @@ export async function getEmotions(callId: string): Promise<EmotionData | null> {
 }
 
 export async function getStats(): Promise<Stats> {
+  const empty: Stats = { totalCalls: 0, avgCompliance: 0, fraudAlerts: 0, pendingReviews: 0, riskDistribution: {}, languages: {}, totalDurationSeconds: 0 };
   try {
     const res = await fetch(`${API_BASE}/stats`);
-    if (!res.ok) return { totalCalls: 0, avgCompliance: 0, fraudAlerts: 0, pendingReviews: 0 };
+    if (!res.ok) return empty;
     const data = await res.json();
     const risk = data.risk_distribution || {};
     return {
@@ -446,9 +475,12 @@ export async function getStats(): Promise<Stats> {
       avgCompliance: data.avg_compliance_score || 0,
       fraudAlerts: (risk.high || 0) + (risk.critical || 0),
       pendingReviews: data.pending_reviews || 0,
+      riskDistribution: risk,
+      languages: data.languages || {},
+      totalDurationSeconds: data.total_duration_seconds || 0,
     };
   } catch {
-    return { totalCalls: 0, avgCompliance: 0, fraudAlerts: 0, pendingReviews: 0 };
+    return empty;
   }
 }
 
@@ -683,6 +715,93 @@ export async function downloadMaskedTranscript(callId: string): Promise<boolean>
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
     return true;
+  } catch {
+    return false;
+  }
+}
+
+// ===== BACKBOARD.IO API =====
+
+export interface BackboardStatus {
+  configured: boolean;
+  assistant_id: string | null;
+  calls_stored: number;
+}
+
+export async function getBackboardStatus(): Promise<BackboardStatus> {
+  try {
+    const res = await fetch(`${API_BASE}/backboard/status`);
+    if (!res.ok) return { configured: false, assistant_id: null, calls_stored: 0 };
+    return await res.json();
+  } catch {
+    return { configured: false, assistant_id: null, calls_stored: 0 };
+  }
+}
+
+export async function queryAuditTrail(question: string, callId?: string): Promise<{ answer: string; error?: string }> {
+  try {
+    const payload: Record<string, string> = { question };
+    if (callId) payload.call_id = callId;
+    const res = await fetch(`${API_BASE}/audit/query`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      const err = await res.text();
+      return { answer: '', error: err };
+    }
+    const data = await res.json();
+    return { answer: data.answer || data.response || JSON.stringify(data) };
+  } catch (e) {
+    return { answer: '', error: String(e) };
+  }
+}
+
+export async function queryCustomerHistory(customerId: string, question: string): Promise<{ answer: string; error?: string }> {
+  try {
+    const res = await fetch(`${API_BASE}/customers/${customerId}/query`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ question }),
+    });
+    if (!res.ok) {
+      const err = await res.text();
+      return { answer: '', error: err };
+    }
+    const data = await res.json();
+    return { answer: data.answer || data.response || JSON.stringify(data) };
+  } catch (e) {
+    return { answer: '', error: String(e) };
+  }
+}
+
+export async function complianceReason(excerpt: string, context: string, regulation: string): Promise<{ reasoning: string; error?: string }> {
+  try {
+    const res = await fetch(`${API_BASE}/compliance/reason`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ excerpt, context, regulation }),
+    });
+    if (!res.ok) {
+      const err = await res.text();
+      return { reasoning: '', error: err };
+    }
+    const data = await res.json();
+    return { reasoning: data.reasoning || data.response || JSON.stringify(data) };
+  } catch (e) {
+    return { reasoning: '', error: String(e) };
+  }
+}
+
+export async function linkCustomer(callId: string, customerId: string): Promise<boolean> {
+  try {
+    const res = await fetch(`${API_BASE}/customers/${customerId}/link`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ call_id: callId }),
+    });
+    return res.ok;
   } catch {
     return false;
   }
