@@ -41,11 +41,21 @@ SYMBOL_CURRENCY_PATTERNS = [
     # ₹ can appear anywhere; Rs/INR require word boundary before them so they don't match
     # inside phone numbers like "1037-498-400" or other alphanumeric strings.
     # Number part: plain digits OR comma-separated (Indian/Western format).
+    # Magnitude group captures million/billion/thousand/mn/bn after the number.
     # Negative lookahead prevents matching numbers followed by more digits or date separators.
-    (r"(?:₹|(?<![A-Za-z0-9])Rs\.?\s*|(?<![A-Za-z0-9])INR\s*)(\d+(?:,\d{2,3})*(?:\.\d{1,2})?)(?!\d|[-/])", "INR"),
-    (r"(?:\$|(?<![A-Za-z0-9])USD\s*)(\d+(?:,\d{2,3})*(?:\.\d{1,2})?)(?!\d|[-/])", "USD"),
-    (r"(?:€|(?<![A-Za-z0-9])EUR\s*)(\d+(?:,\d{2,3})*(?:\.\d{1,2})?)(?!\d|[-/])", "EUR"),
+    (r"(?:₹|(?<![A-Za-z0-9])Rs\.?\s*|(?<![A-Za-z0-9])INR\s*)(\d+(?:,\d{2,3})*(?:\.\d{1,2})?)(?!\d|[-/])\s*(crore|lakh|thousand|million|billion|cr|mn|bn|[mbk]\b)?", "INR"),
+    (r"(?:\$|(?<![A-Za-z0-9])USD\s*)(\d+(?:,\d{2,3})*(?:\.\d{1,2})?)(?!\d|[-/])\s*(million|billion|thousand|mn|bn|[mbk]\b)?", "USD"),
+    (r"(?:€|(?<![A-Za-z0-9])EUR\s*)(\d+(?:,\d{2,3})*(?:\.\d{1,2})?)(?!\d|[-/])\s*(million|billion|thousand|mn|bn|[mbk]\b)?", "EUR"),
 ]
+
+# Magnitude multipliers for currency patterns
+_MAGNITUDE_MAP = {
+    "million": 1_000_000, "mn": 1_000_000, "m": 1_000_000,
+    "billion": 1_000_000_000, "bn": 1_000_000_000, "b": 1_000_000_000,
+    "thousand": 1_000, "k": 1_000,
+    "crore": 10_000_000, "cr": 10_000_000,
+    "lakh": 100_000,
+}
 
 # ── DATE PATTERNS (numeric, language-agnostic — always run) ──
 
@@ -156,7 +166,7 @@ def extract_entities_regex(segments: list, lang: str = "en") -> list[FinancialEn
         # Currency amounts
         for pattern, currency in currency_patterns:
             for match in re.finditer(pattern, text, re.IGNORECASE):
-                raw = match.group(0)
+                raw = match.group(0).strip()
                 value_str = match.group(1).replace(",", "")
 
                 if currency == "INR_LAKH":
@@ -170,6 +180,14 @@ def extract_entities_regex(segments: list, lang: str = "en") -> list[FinancialEn
                     currency = "INR"
                 else:
                     value = float(value_str)
+                    # Check for magnitude word (million, billion, etc.) in group 2
+                    try:
+                        magnitude = match.group(2)
+                        if magnitude:
+                            multiplier = _MAGNITUDE_MAP.get(magnitude.lower(), 1)
+                            value *= multiplier
+                    except (IndexError, AttributeError):
+                        pass
 
                 entities.append(FinancialEntity(
                     entity_type="payment_amount",
@@ -396,8 +414,39 @@ def extract_all_entities_layer1(segments: list, lang: str = "en") -> list[Financ
             seen_keys.add(key)
             merged.append(e)
 
+    # Validation: filter out noise entities
+    validated = []
+    for e in merged:
+        raw = e.raw_text.strip() if e.raw_text else ""
+        val = e.value.strip() if e.value else ""
+        # Reject bare single digits as reference numbers (e.g., "2" from "press star then 2")
+        if e.entity_type == "reference_number" and raw.isdigit() and int(raw) < 10:
+            continue
+        # Reject known acronyms misidentified as organizations
+        if e.entity_type == "organization" and raw.upper() in (
+            "OTP", "EMI", "KYC", "PAN", "UPI", "CEO", "CFO", "CTO", "COO",
+            "SEC", "GDP", "IT", "HR", "ATM", "PIN", "SIP", "NPA", "API",
+            "O&M", "EPS", "IPO", "ETF", "NAV", "AUM", "ROE", "ROI", "P&L",
+        ):
+            continue
+        # Reject vague temporal references as due_date (not actionable)
+        if e.entity_type in ("due_date", "date"):
+            raw_lower = raw.lower()
+            vague_dates = (
+                "today", "tomorrow", "yesterday", "this year", "last year", "next year",
+                "this quarter", "last quarter", "next quarter", "this month", "last month",
+                "this week", "now", "recently", "currently", "the quarter", "the year",
+                "this past quarter", "previous years", "prior year", "prior quarter",
+                "winter season", "summer", "winter", "spring", "fall",
+                "every day", "quarterly", "annually", "monthly", "weekly", "daily",
+                "each year", "each quarter", "each month", "every year",
+            )
+            if raw_lower in vague_dates or raw_lower.endswith("ago") or raw_lower.isdigit():
+                continue
+        validated.append(e)
+
     logger.info(
-        f"Layer 1 total: {len(merged)} entities "
-        f"(regex={len(regex_entities)}, NER={len(ner_entities)}, spaCy={len(spacy_entities)})"
+        f"Layer 1 total: {len(validated)} entities "
+        f"(regex={len(regex_entities)}, NER={len(ner_entities)}, spaCy={len(spacy_entities)}, filtered={len(merged)-len(validated)})"
     )
-    return merged
+    return validated

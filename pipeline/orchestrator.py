@@ -451,48 +451,89 @@ def process_call(
         logger.error(f"[{call_id}] Intent classification failed: {e}")
         intents = []
 
-    # Run 3 LLM calls in parallel (model selected by language)
-    from concurrent.futures import ThreadPoolExecutor as _LLMPool
-    with _LLMPool(max_workers=3) as llm_pool:
-        f_ent = llm_pool.submit(_extract_entities_llm, segments, detected_lang)
-        f_obl = llm_pool.submit(_detect_obligations, segments, detected_lang)
-        f_sum = llm_pool.submit(_generate_summary, segments, call_type, detected_lang)
-
-    try:
-        llm_entities = f_ent.result(timeout=90)
-    except Exception as e:
-        logger.warning(f"[{call_id}] LLM entity extraction failed: {e}")
+    # Skip LLM extraction if transcript is garbage (low confidence / "foreign" text)
+    transcript_conf = transcript.get("overall_confidence", 1.0)
+    if transcript_conf < 0.55 or len(segments) == 0:
+        logger.info(f"[{call_id}] Skipping LLM extraction — low transcript confidence ({transcript_conf:.2f})")
         llm_entities = []
-    try:
-        obligations = f_obl.result(timeout=90)
-    except Exception as e:
-        logger.warning(f"[{call_id}] Obligation detection failed: {e}")
         obligations = []
-    try:
-        call_summary, key_outcomes, next_actions = f_sum.result(timeout=90)
-    except Exception as e:
-        logger.warning(f"[{call_id}] Summary generation failed: {e}")
-        call_summary = "Summary generation failed — see extracted fields."
-        key_outcomes, next_actions = ["See analysis fields"], ["Review if needed"]
+        call_summary = "Transcript confidence too low for reliable analysis."
+        key_outcomes = ["Low confidence transcript — re-process with better audio"]
+        next_actions = ["Verify audio quality and language settings"]
+        all_entities = _merge_entities(layer1_entities, [])
+        financial_insights = _generate_financial_insights(
+            all_entities, intents, segments, call_type,
+            call_summary, key_outcomes, detected_lang,
+        )
+        # Skip to VRAM cleanup
+        try:
+            unload_ollama_model(_get_llm_model(detected_lang))
+        except Exception:
+            pass
+        _reload_future = None
+        with ThreadPoolExecutor(max_workers=1) as reload_pool:
+            _reload_future = reload_pool.submit(reload_whisperx)
+        completed.append("4I")
+        _stage_timer("Stage 5: Output")
+        _progress("5", "Generating output")
+        # Jump directly to Stage 5 — use a flag
+        _skip_llm = True
+    else:
+        _skip_llm = False
 
-    # Merge Layer 1 + Layer 2 entities
-    all_entities = _merge_entities(layer1_entities, llm_entities)
+    if not _skip_llm:
+        # Run 3 LLM calls in parallel (model selected by language)
+        from concurrent.futures import ThreadPoolExecutor as _LLMPool
+        with _LLMPool(max_workers=3) as llm_pool:
+            f_ent = llm_pool.submit(_extract_entities_llm, segments, detected_lang)
+            f_obl = llm_pool.submit(_detect_obligations, segments, detected_lang)
+            f_sum = llm_pool.submit(
+                _generate_summary, segments, call_type, detected_lang,
+                entities=layer1_entities, intents=intents,
+                compliance_checks=compliance_checks, fraud_signals=fraud_signals,
+                sentiment_summary=sentiment_context,
+            )
 
-    # Free Ollama VRAM, then reload WhisperX for next call
-    try:
-        unload_ollama_model(_get_llm_model(detected_lang))
-    except Exception:
-        pass
+        try:
+            llm_entities = f_ent.result(timeout=90)
+        except Exception as e:
+            logger.warning(f"[{call_id}] LLM entity extraction failed: {e}")
+            llm_entities = []
+        try:
+            obligations = f_obl.result(timeout=90)
+        except Exception as e:
+            logger.warning(f"[{call_id}] Obligation detection failed: {e}")
+            obligations = []
+        try:
+            call_summary, key_outcomes, next_actions = f_sum.result(timeout=90)
+        except Exception as e:
+            logger.warning(f"[{call_id}] Summary generation failed: {e}")
+            call_summary = "Summary generation failed — see extracted fields."
+            key_outcomes, next_actions = ["See analysis fields"], ["Review if needed"]
 
-    # Reload WhisperX into GPU — ready for the next call instantly.
-    # This runs in a background thread so it doesn't block Stage 5 (CPU-only).
-    _reload_future = None
-    with ThreadPoolExecutor(max_workers=1) as reload_pool:
-        _reload_future = reload_pool.submit(reload_whisperx)
+        # Merge Layer 1 + Layer 2 entities
+        all_entities = _merge_entities(layer1_entities, llm_entities)
 
-    completed.append("4I")
-    _stage_timer("Stage 5: Output")
-    _progress("5", "Generating output")
+        # Generate financial insights (synthesize entities + intents + summary)
+        financial_insights = _generate_financial_insights(
+            all_entities, intents, segments, call_type,
+            call_summary, key_outcomes, detected_lang,
+        )
+
+        # Free Ollama VRAM, then reload WhisperX for next call
+        try:
+            unload_ollama_model(_get_llm_model(detected_lang))
+        except Exception:
+            pass
+
+        # Reload WhisperX into GPU — ready for the next call instantly.
+        _reload_future = None
+        with ThreadPoolExecutor(max_workers=1) as reload_pool:
+            _reload_future = reload_pool.submit(reload_whisperx)
+
+        completed.append("4I")
+        _stage_timer("Stage 5: Output")
+        _progress("5", "Generating output")
 
     # ── STAGE 5: PRODUCE OUTPUT (CPU) ──
     logger.info(f"[{call_id}] Stage 5: Generating output")
@@ -650,6 +691,7 @@ def process_call(
         call_summary=call_summary,
         key_outcomes=key_outcomes,
         next_actions=next_actions,
+        financial_insights=financial_insights,
     )
 
     # Save output
@@ -683,6 +725,68 @@ def process_call(
     return call_record
 
 
+def _keyword_intent_fallback(text: str, call_type: str) -> tuple[CallIntent, float]:
+    """Keyword-based intent classification for utterances the LLM missed.
+
+    Returns (intent, confidence). Much better than blind 'unknown' at 0.3.
+    """
+    lower = text.lower().strip()
+
+    # Procedural / call management
+    procedural_kw = (
+        "listen-only", "press star", "press pound", "operator", "conference",
+        "question-and-answer", "q&a session", "webcast", "dial in", "replay",
+        "forward-looking statement", "safe harbor", "sec filing", "10-k", "10-q",
+        "participants", "signal a conference", "hold the line", "muted",
+        "recording", "call is being recorded", "housekeeping",
+    )
+    if any(kw in lower for kw in procedural_kw):
+        return CallIntent.PROCEDURAL, 0.75
+
+    # Financial disclosure (numbers, results)
+    disclosure_kw = (
+        "revenue", "earnings", "income", "expense", "margin", "profit",
+        "ebitda", "cash flow", "dividend", "per share", "eps",
+        "basis points", "year-over-year", "quarter-over-quarter",
+        "increased by", "decreased by", "grew by", "declined",
+        "compared to", "versus prior", "million", "billion",
+    )
+    if any(kw in lower for kw in disclosure_kw):
+        return CallIntent.FINANCIAL_DISCLOSURE, 0.70
+
+    # Guidance / forecast
+    guidance_kw = (
+        "expect", "anticipate", "forecast", "outlook", "guidance",
+        "project", "target", "estimate for", "looking ahead",
+        "for the full year", "next quarter", "going forward",
+    )
+    if any(kw in lower for kw in guidance_kw):
+        return CallIntent.GUIDANCE_FORECAST, 0.70
+
+    # Risk warning
+    risk_kw = (
+        "risk", "uncertainty", "caution", "could affect", "may impact",
+        "no assurance", "subject to", "disclaimer", "not guarantee",
+    )
+    if any(kw in lower for kw in risk_kw):
+        return CallIntent.RISK_WARNING, 0.65
+
+    # Question
+    if lower.rstrip().endswith("?") or lower.startswith(("could you", "can you", "what is", "how do", "why did", "when will")):
+        return CallIntent.QUESTION, 0.70
+
+    # Explanation (answering)
+    explain_kw = ("the reason", "because", "this is due to", "as a result", "let me explain", "so what happened")
+    if any(kw in lower for kw in explain_kw):
+        return CallIntent.EXPLANATION, 0.65
+
+    # For general calls, default to info_request instead of unknown
+    if call_type == "general":
+        return CallIntent.INFORMATION_REQUEST, 0.50
+
+    return CallIntent.UNKNOWN, 0.30
+
+
 def _classify_intents_with_prefilter(segments: list, lang: str = "en", call_type: str = "general") -> list[UtteranceIntent]:
     """Classify intents using FinBERT pre-filter + raw LLM call (no Instructor).
 
@@ -697,6 +801,8 @@ def _classify_intents_with_prefilter(segments: list, lang: str = "en", call_type
         "agreement", "refusal", "request_extension", "payment_promise",
         "complaint", "consent_given", "consent_denied", "info_request",
         "negotiation", "escalation", "dispute", "acknowledgment", "greeting",
+        "financial_disclosure", "guidance_forecast", "risk_warning",
+        "question", "explanation", "procedural",
         "unknown",
     }
 
@@ -790,8 +896,16 @@ def _classify_intents_with_prefilter(segments: list, lang: str = "en", call_type
         else:
             type_hint = (
                 "This is a GENERAL financial call (earnings, advisory, or informational). "
-                "Common intents: info_request, acknowledgment, agreement. "
-                "Avoid labeling financial discussion as dispute/complaint unless clearly adversarial."
+                "Use these SPECIFIC intents for financial calls:\n"
+                "- financial_disclosure: Reporting numbers, metrics, results (revenue, expenses, margins, growth rates)\n"
+                "- guidance_forecast: Forward-looking statements, projections, expectations, targets\n"
+                "- risk_warning: Cautionary statements, risk factors, disclaimers, uncertainties\n"
+                "- question: Analyst or participant asking a question\n"
+                "- explanation: Answering a question, providing reasoning or context for a decision\n"
+                "- procedural: Call logistics, operator instructions, introductions, housekeeping\n"
+                "- info_request: General information sharing that doesn't fit the above\n"
+                "- agreement/acknowledgment: Confirming or agreeing with something said\n"
+                "Reserve 'unknown' ONLY for truly unintelligible or off-topic utterances."
             )
 
         prompt = (
@@ -803,7 +917,8 @@ def _classify_intents_with_prefilter(segments: list, lang: str = "en", call_type
             + "\n".join(classify_list) + "\n\n"
             f"Valid intents: agreement, refusal, request_extension, payment_promise, "
             f"complaint, consent_given, consent_denied, info_request, negotiation, "
-            f"escalation, dispute, acknowledgment, greeting, unknown\n\n"
+            f"escalation, dispute, acknowledgment, greeting, "
+            f"financial_disclosure, guidance_forecast, risk_warning, question, explanation, procedural, unknown\n\n"
             f"For EACH utterance, output exactly one line:\n"
             f"IDX|intent|confidence\n"
             f"Where confidence is 0.0-1.0 (how certain you are).\n"
@@ -845,7 +960,15 @@ def _classify_intents_with_prefilter(segments: list, lang: str = "en", call_type
                         except ValueError:
                             conf = 0.70
 
-                    seg_i, _, speaker, _ = batch[idx]
+                    seg_i, text, speaker, _ = batch[idx]
+
+                    # If LLM returned "unknown", try keyword fallback before accepting
+                    if intent_str == "unknown":
+                        fb_intent, fb_conf = _keyword_intent_fallback(text, call_type)
+                        if fb_intent != CallIntent.UNKNOWN:
+                            intent_str = fb_intent.value
+                            conf = fb_conf
+
                     intents.append(UtteranceIntent(
                         segment_id=seg_i,
                         speaker=speaker,
@@ -856,14 +979,15 @@ def _classify_intents_with_prefilter(segments: list, lang: str = "en", call_type
                 except (ValueError, KeyError):
                     continue
 
-            # Fill any missed utterances with "unknown" (not "acknowledgment")
-            for idx, (seg_i, _, speaker, _) in enumerate(batch):
+            # Fill any missed utterances with keyword-based fallback (not blind "unknown")
+            for idx, (seg_i, text, speaker, _) in enumerate(batch):
                 if idx not in classified_indices:
+                    fallback_intent, fallback_conf = _keyword_intent_fallback(text, call_type)
                     intents.append(UtteranceIntent(
                         segment_id=seg_i,
                         speaker=speaker,
-                        intent=CallIntent.UNKNOWN,
-                        confidence=0.3,
+                        intent=fallback_intent,
+                        confidence=fallback_conf,
                     ))
 
             total_classified += len(classified_indices)
@@ -926,11 +1050,14 @@ def _extract_all_llm_batched(
     prompt = (
         f"Analyze this {call_type} financial call transcript and extract ALL of the following:\n"
         f"{lang_context}\n"
-        f"1. FINANCIAL ENTITIES: Amounts referenced indirectly ('the monthly installment'), "
+        f"1. SUMMARY (REQUIRED): Write a 2-3 sentence summary of the call. "
+        f"List 3-5 key outcomes as bullet points. List required next actions.\n\n"
+        f"2. FINANCIAL ENTITIES: Amounts referenced indirectly ('the monthly installment'), "
         f"product names, tenure, contextual dates. Skip obvious numbers already in the text.\n\n"
-        f"2. OBLIGATIONS: Payment promises, consent given/denied, authorizations, disputes. "
+        f"3. OBLIGATIONS: Payment promises, consent given/denied, authorizations, disputes. "
         f"Classify strength as: binding, conditional, promise, vague, or denial.\n\n"
-        f"3. SUMMARY: A 2-3 sentence summary, key outcomes (3-5 bullets), and next actions.\n\n"
+        f"IMPORTANT: You MUST provide a meaningful summary, key_outcomes, and next_actions. "
+        f"Do NOT leave them empty or as defaults.\n\n"
         f"TRANSCRIPT:\n{full_text[:6000]}"
     )
 
@@ -946,12 +1073,25 @@ def _extract_all_llm_batched(
             ),
             timeout=60,
         )
+        summary = result.summary
+        outcomes = result.key_outcomes
+        actions = result.next_actions
+        logger.info(f"LLM summary: {summary[:100]}... | outcomes={len(outcomes)} | actions={len(actions)}")
+
+        # If combined call returned defaults for summary, retry with dedicated summary call
+        if summary in ("Call processed.", "") or not outcomes or outcomes == []:
+            logger.info("Combined call returned default summary, retrying with dedicated summary call...")
+            try:
+                summary, outcomes, actions = _generate_summary(segments, call_type, lang=lang)
+            except Exception:
+                pass
+
         return (
             result.financial_entities,
             result.obligations,
-            result.summary,
-            result.key_outcomes,
-            result.next_actions,
+            summary,
+            outcomes,
+            actions,
         )
     except Exception as e:
         logger.warning(f"Combined LLM extraction failed ({e}), trying individual calls...")
@@ -985,6 +1125,7 @@ def _extract_entities_llm(segments: list, lang: str = "en") -> list[FinancialEnt
 
     try:
         raw = extract_raw(prompt, model=_get_llm_model(lang), timeout=45)
+        logger.info(f"LLM entity raw ({len(raw)} chars): {raw[:200]}")
         entities = []
         for line in raw.strip().split("\n"):
             line = line.strip()
@@ -997,6 +1138,7 @@ def _extract_entities_llm(segments: list, lang: str = "en") -> list[FinancialEnt
                         raw_text=parts[3].strip(),
                         confidence=0.7,
                     ))
+        logger.info(f"LLM entities extracted: {len(entities)}")
         return entities
     except Exception as e:
         logger.warning(f"LLM entity extraction failed: {e}")
@@ -1042,47 +1184,96 @@ def _detect_obligations(segments: list, lang: str = "en") -> list[Obligation]:
         return []
 
 
-def _generate_summary(segments: list, call_type: str, lang: str = "en") -> tuple[str, list[str], list[str]]:
-    """Generate call summary using raw completion."""
+def _generate_summary(
+    segments: list, call_type: str, lang: str = "en",
+    entities=None, intents=None, compliance_checks=None,
+    fraud_signals=None, sentiment_summary=None,
+) -> tuple[str, list[str], list[str]]:
+    """Generate in-depth financial summary from the full transcript."""
     from services.llm.client import extract_raw
-    compressed = _compress_transcript_for_llm(segments)
+    # Send the full transcript — qwen2.5:3b has 32K context, let the LLM read everything
+    compressed = _compress_transcript_for_llm(segments, max_chars=50000)
 
     lang_name = LANGUAGE_NAMES.get(lang, lang)
     lang_context = f"The call transcript is in {lang_name}. Respond in English.\n" if lang != "en" else ""
 
     prompt = (
-        f"Summarize this {call_type} call.\n"
-        f"{lang_context}"
-        f"Use this EXACT format:\n"
-        f"SUMMARY: [2-3 sentence summary]\n"
-        f"OUTCOMES:\n- [outcome 1]\n- [outcome 2]\n- [outcome 3]\n"
-        f"ACTIONS:\n- [action 1]\n- [action 2]\n\n"
-        f"{compressed[:4000]}"
+        f"You are a senior financial analyst. Read this entire {call_type} call transcript carefully "
+        f"and write an in-depth financial summary.\n"
+        f"{lang_context}\n"
+        f"TRANSCRIPT:\n{compressed}\n\n"
+        f"Now write your analysis in EXACTLY this format:\n\n"
+        f"SUMMARY: Write a detailed 5-8 sentence financial summary. Cover: revenue and earnings figures, "
+        f"margin changes, capital expenditure, guidance or forecasts, strategic initiatives, "
+        f"regulatory matters, and management outlook. Cite specific dollar amounts, percentages, "
+        f"and time periods. Name the speakers and their roles.\n\n"
+        f"OUTCOMES:\n"
+        f"- [Key financial metric or result with exact numbers]\n"
+        f"- [Important strategic decision or announcement]\n"
+        f"- [Risk factor or regulatory development]\n"
+        f"- [Guidance or forward-looking statement]\n\n"
+        f"ACTIONS:\n"
+        f"- [Concrete follow-up for investors/analysts]\n"
+        f"- [Management commitment or next milestone]\n"
     )
 
     try:
-        raw = extract_raw(prompt, model=_get_llm_model(lang), timeout=45)
+        raw = extract_raw(prompt, model=_get_llm_model(lang), timeout=120)
         summary = ""
         outcomes = []
         actions = []
         section = None
         for line in raw.strip().split("\n"):
             line = line.strip()
-            if line.startswith("SUMMARY:"):
-                summary = line[8:].strip()
+            if not line:
+                continue
+            lower = line.lower()
+            if lower.startswith("summary:") or lower.startswith("**summary"):
+                summary = line.split(":", 1)[1].strip().strip("*").strip()
                 section = "summary"
-            elif line.startswith("OUTCOMES:"):
+            elif lower.startswith("outcomes:") or lower.startswith("**outcomes") or lower.startswith("key outcomes"):
                 section = "outcomes"
-            elif line.startswith("ACTIONS:"):
+            elif lower.startswith("actions:") or lower.startswith("**actions") or lower.startswith("next actions"):
                 section = "actions"
-            elif line.startswith("- ") or line.startswith("* "):
-                item = line[2:].strip()
-                if section == "outcomes":
-                    outcomes.append(item)
-                elif section == "actions":
-                    actions.append(item)
-            elif section == "summary" and line and not summary:
-                summary = line
+            elif line.startswith("- ") or line.startswith("* ") or (line[:2].isdigit() and line[1] in ".)" and len(line) > 3):
+                item = line.lstrip("-*0123456789.) ").strip()
+                if item:
+                    if section == "outcomes":
+                        outcomes.append(item)
+                    elif section == "actions":
+                        actions.append(item)
+            elif section == "summary" and line:
+                # Append continuation lines to summary (LLM may split across lines)
+                addition = line.strip("*").strip()
+                if addition:
+                    summary = (summary + " " + addition).strip() if summary else addition
+
+        # Clean up LLM artifacts: strip "[Outcome 1]:", "[Action 1]:", numbered prefixes
+        import re
+        def _clean_item(s: str) -> str:
+            return re.sub(r'^\[?(Outcome|Action|Step|Item)\s*\d*\]?:?\s*', '', s, flags=re.IGNORECASE).strip()
+
+        outcomes = [_clean_item(o) for o in outcomes if _clean_item(o)]
+        actions = [_clean_item(a) for a in actions if _clean_item(a)]
+
+        # Reject template/placeholder text the LLM may have copied verbatim
+        _template_markers = (
+            "[2-3 sentence", "[outcome", "[action", "[summary",
+            "write a concise", "replace each description",
+            "first key outcome", "first follow-up action",
+            "second key outcome", "third key outcome",
+            "second follow-up", "<your ", "<outcome", "<action",
+            "key outcome was", "follow-up action needed",
+            "[write ", "[first ", "[second ", "[third ",
+            "specific finding", "concrete next step",
+        )
+        if summary and any(m in summary.lower() for m in _template_markers):
+            logger.warning(f"Summary is template text, discarding: {summary[:80]}")
+            summary = ""
+        outcomes = [o for o in outcomes if not any(m in o.lower() for m in _template_markers)]
+        actions = [a for a in actions if not any(m in a.lower() for m in _template_markers)]
+
+        logger.info(f"LLM summary: {(summary or '(empty)')[:120]}")
 
         return (
             summary or "Call processed — see extracted fields.",
@@ -1092,6 +1283,326 @@ def _generate_summary(segments: list, call_type: str, lang: str = "en") -> tuple
     except Exception as e:
         logger.warning(f"Summary generation failed: {e}")
         return "Call processed — see extracted fields.", ["See analysis fields"], ["Review if needed"]
+
+
+def _generate_financial_insights(
+    entities: list, intents: list, segments: list, call_type: str,
+    summary: str, outcomes: list, lang: str = "en",
+) -> dict:
+    """Synthesize entities + intents into actionable financial insights.
+
+    Pure Python — no extra LLM call. Runs in <1ms on CPU.
+    """
+    from collections import Counter, defaultdict
+
+    insights: dict = {
+        "key_metrics": [],
+        "risk_factors": [],
+        "recommendations": [],
+        "topic_sentiment": {},
+        "call_effectiveness": {},
+        "discussion_topics": [],
+    }
+
+    # ── Keyword sentiment scorer (no model needed) ──
+    _POS = frozenset({
+        'growth', 'increase', 'increased', 'profit', 'profits', 'improved',
+        'strong', 'stronger', 'exceeded', 'favorable', 'positive', 'successful',
+        'opportunity', 'opportunities', 'confident', 'confidence', 'gain', 'gains',
+        'improvement', 'revenue', 'earnings', 'upgrade', 'upgraded', 'optimistic',
+        'record', 'highest', 'exceeded', 'beat', 'outperform', 'robust', 'solid',
+        'stable', 'stability', 'momentum', 'expand', 'expansion', 'growing',
+        'raised', 'upside', 'progress', 'achievement', 'surpassed', 'delivered',
+    })
+    _NEG = frozenset({
+        'decline', 'declined', 'loss', 'losses', 'decrease', 'decreased', 'risk',
+        'risks', 'concern', 'concerns', 'challenge', 'challenges', 'negative',
+        'lower', 'lowered', 'difficult', 'difficulty', 'headwind', 'headwinds',
+        'uncertainty', 'uncertain', 'volatile', 'volatility', 'impairment',
+        'decline', 'warning', 'cautious', 'weakness', 'weaker', 'litigation',
+        'regulatory', 'penalty', 'penalties', 'shortage', 'pressure', 'pressures',
+        'disruption', 'adverse', 'deterioration', 'downturn', 'deficit', 'miss',
+    })
+
+    def _keyword_sentiment(text: str) -> float:
+        words = set(text.lower().split())
+        pos = len(words & _POS)
+        neg = len(words & _NEG)
+        total = pos + neg
+        if total == 0:
+            return 0.0
+        return round((pos - neg) / total, 2)
+
+    # ── Key Metrics: extract from entities ──
+    amounts = []
+    rates = []
+    dates = []
+    orgs = []
+    people = []
+    for e in entities:
+        etype = getattr(e, 'entity_type', '') or ''
+        raw = getattr(e, 'raw_text', '') or ''
+        val = getattr(e, 'value', '') or getattr(e, 'normalized_value', '') or ''
+        conf = getattr(e, 'confidence', 0) or 0
+        seg_id = getattr(e, 'segment_id', None)
+
+        if etype in ('payment_amount', 'currency_amount', 'emi_amount', 'loan_amount'):
+            amounts.append({"value": str(val), "context": raw, "confidence": conf, "segment_id": seg_id})
+        elif etype in ('interest_rate',):
+            rates.append({"value": str(val), "context": raw, "segment_id": seg_id})
+        elif etype in ('due_date', 'date'):
+            dates.append({"value": str(val), "context": raw, "segment_id": seg_id})
+        elif etype == 'organization':
+            orgs.append({"value": str(val), "context": raw, "segment_id": seg_id})
+        elif etype == 'person_name':
+            people.append({"value": str(val), "context": raw, "segment_id": seg_id})
+
+    if amounts:
+        try:
+            amounts.sort(key=lambda a: float(str(a["value"]).replace(",", "")), reverse=True)
+        except (ValueError, TypeError):
+            pass
+        for a in amounts[:8]:
+            m = {
+                "type": "financial_amount",
+                "value": a["value"],
+                "context": a["context"],
+                "confidence": a["confidence"],
+            }
+            if a.get("segment_id") is not None:
+                m["segment_id"] = a["segment_id"]
+            insights["key_metrics"].append(m)
+
+    if rates:
+        for r in rates[:4]:
+            m = {
+                "type": "rate",
+                "value": r["value"],
+                "context": r["context"],
+            }
+            if r.get("segment_id") is not None:
+                m["segment_id"] = r["segment_id"]
+            insights["key_metrics"].append(m)
+
+    if dates:
+        for d in dates[:4]:
+            m = {
+                "type": "date",
+                "value": d["value"],
+                "context": d["context"],
+            }
+            if d.get("segment_id") is not None:
+                m["segment_id"] = d["segment_id"]
+            insights["key_metrics"].append(m)
+
+    # Deduplicate organizations by normalized name
+    seen_orgs = set()
+    for o in orgs:
+        name = o["value"].strip().lower()
+        if name and name not in seen_orgs and len(name) > 2:
+            seen_orgs.add(name)
+            m = {
+                "type": "organization",
+                "value": o["value"],
+                "context": o["context"],
+            }
+            if o.get("segment_id") is not None:
+                m["segment_id"] = o["segment_id"]
+            insights["key_metrics"].append(m)
+    # Cap total organizations shown
+    org_metrics = [m for m in insights["key_metrics"] if m["type"] == "organization"]
+    if len(org_metrics) > 6:
+        insights["key_metrics"] = [m for m in insights["key_metrics"] if m["type"] != "organization"] + org_metrics[:6]
+
+    # Deduplicate people
+    seen_people = set()
+    for p in people:
+        name = p["value"].strip().lower()
+        if name and name not in seen_people and len(name) > 2:
+            seen_people.add(name)
+            m = {
+                "type": "key_person",
+                "value": p["value"],
+                "context": p["context"],
+            }
+            if p.get("segment_id") is not None:
+                m["segment_id"] = p["segment_id"]
+            insights["key_metrics"].append(m)
+    person_metrics = [m for m in insights["key_metrics"] if m["type"] == "key_person"]
+    if len(person_metrics) > 6:
+        insights["key_metrics"] = [m for m in insights["key_metrics"] if m["type"] != "key_person"] + person_metrics[:6]
+
+    # ── Discussion Topics: from intent distribution ──
+    intent_counts = Counter()
+    intent_to_segments: dict[str, list[int]] = defaultdict(list)
+    for intent in intents:
+        i_val = intent.intent.value if hasattr(intent.intent, 'value') else str(intent.intent)
+        intent_counts[i_val] += 1
+        intent_to_segments[i_val].append(intent.segment_id)
+
+    total_intents = sum(intent_counts.values()) or 1
+
+    topic_map = {
+        "financial_disclosure": "Financial Results & Metrics",
+        "guidance_forecast": "Forward Guidance & Projections",
+        "risk_warning": "Risk Factors & Cautions",
+        "question": "Analyst Q&A",
+        "explanation": "Management Commentary",
+        "procedural": "Call Administration",
+        "info_request": "Information Exchange",
+        "agreement": "Agreements Reached",
+        "payment_promise": "Payment Commitments",
+        "complaint": "Complaints Raised",
+        "negotiation": "Active Negotiations",
+        "escalation": "Escalation Events",
+        "dispute": "Disputes",
+        "refusal": "Refusals/Denials",
+        "consent_given": "Consent Provided",
+        "consent_denied": "Consent Denied",
+    }
+
+    for intent_key, count in intent_counts.most_common():
+        if intent_key in ("greeting", "acknowledgment", "unknown", "procedural"):
+            continue
+        label = topic_map.get(intent_key, intent_key.replace("_", " ").title())
+        pct = round(count / total_intents * 100)
+        if pct >= 2:  # Lower threshold to capture more topics
+            insights["discussion_topics"].append({
+                "topic": label,
+                "mentions": count,
+                "percentage": pct,
+            })
+
+    # ── Topic Sentiment: keyword-based scoring per intent group ──
+    for intent_key, seg_ids in intent_to_segments.items():
+        if intent_key in ("greeting", "acknowledgment", "unknown", "procedural"):
+            continue
+        label = topic_map.get(intent_key, intent_key.replace("_", " ").title())
+        scores = []
+        for sid in seg_ids:
+            if sid < len(segments):
+                text = segments[sid].get("text", "")
+                s = _keyword_sentiment(text)
+                scores.append(s)
+        if scores:
+            avg = round(sum(scores) / len(scores), 2)
+            insights["topic_sentiment"][label] = avg
+
+    # ── Risk Factors ──
+    if intent_counts.get("risk_warning", 0) > 0:
+        risk_segs = [
+            segments[i.segment_id].get("text", "")[:120]
+            for i in intents
+            if (i.intent.value if hasattr(i.intent, 'value') else str(i.intent)) == "risk_warning"
+            and i.segment_id < len(segments)
+        ]
+        for rs in risk_segs[:4]:
+            insights["risk_factors"].append({"type": "stated_risk", "detail": rs.strip()})
+
+    if intent_counts.get("complaint", 0) > 0:
+        insights["risk_factors"].append({
+            "type": "complaint_detected",
+            "detail": f"{intent_counts['complaint']} complaint(s) raised during call",
+        })
+
+    if intent_counts.get("escalation", 0) > 0:
+        insights["risk_factors"].append({
+            "type": "escalation_detected",
+            "detail": f"{intent_counts['escalation']} escalation event(s)",
+        })
+
+    if intent_counts.get("dispute", 0) > 0:
+        insights["risk_factors"].append({
+            "type": "dispute_detected",
+            "detail": f"{intent_counts['dispute']} dispute(s) identified",
+        })
+
+    # High refusal rate is a risk signal
+    refusal_pct = intent_counts.get("refusal", 0) / total_intents * 100
+    if refusal_pct > 10:
+        insights["risk_factors"].append({
+            "type": "high_refusal_rate",
+            "detail": f"Refusal rate {refusal_pct:.0f}% — customer resistance detected",
+        })
+
+    # ── Call Effectiveness ──
+    total_segs = len(segments)
+    unique_speakers = set(s.get("speaker", "") for s in segments)
+
+    # Speaker balance analysis
+    speaker_counts = Counter(s.get("speaker", "") for s in segments)
+    speaker_balance = 0.0
+    if len(speaker_counts) >= 2:
+        vals = sorted(speaker_counts.values(), reverse=True)
+        speaker_balance = round(vals[1] / vals[0] * 100, 1) if vals[0] > 0 else 0.0
+
+    # Average segment length (words)
+    total_words = sum(len(s.get("text", "").split()) for s in segments)
+    avg_seg_words = round(total_words / total_segs, 1) if total_segs > 0 else 0
+
+    insights["call_effectiveness"] = {
+        "total_segments": total_segs,
+        "total_speakers": len(unique_speakers),
+        "entities_extracted": len(entities),
+        "intents_classified": len(intents),
+        "unknown_rate": round(intent_counts.get("unknown", 0) / total_intents * 100, 1),
+        "disclosure_rate": round(intent_counts.get("financial_disclosure", 0) / total_intents * 100, 1),
+        "qa_rate": round(
+            (intent_counts.get("question", 0) + intent_counts.get("explanation", 0)) / total_intents * 100, 1
+        ),
+        "total_words": total_words,
+        "avg_words_per_segment": avg_seg_words,
+        "speaker_balance": speaker_balance,
+    }
+
+    # ── Recommendations ──
+    if call_type == "collections":
+        if intent_counts.get("payment_promise", 0) > 0:
+            insights["recommendations"].append("Follow up on payment commitments made during call")
+        if intent_counts.get("refusal", 0) > 0:
+            insights["recommendations"].append("Customer expressed refusal — consider alternative resolution paths")
+        if intent_counts.get("escalation", 0) > 0:
+            insights["recommendations"].append("Escalation detected — route to senior handler")
+        if intent_counts.get("negotiation", 0) > 0:
+            insights["recommendations"].append("Negotiation activity detected — review settlement terms")
+    elif call_type in ("kyc", "onboarding"):
+        if intent_counts.get("consent_given", 0) > 0:
+            insights["recommendations"].append("Consent obtained — archive for audit trail")
+        if intent_counts.get("consent_denied", 0) > 0:
+            insights["recommendations"].append("Consent denied — escalate to compliance team")
+        if intent_counts.get("info_request", 0) > 2:
+            insights["recommendations"].append("Multiple information requests — ensure all disclosures were completed")
+    elif call_type == "complaint":
+        if intent_counts.get("escalation", 0) > 0:
+            insights["recommendations"].append("Customer requested escalation — assign to senior resolution team")
+        if intent_counts.get("agreement", 0) > 0:
+            insights["recommendations"].append("Resolution agreed upon — confirm follow-through within SLA")
+        else:
+            insights["recommendations"].append("No resolution reached — schedule follow-up within 48 hours")
+    elif call_type == "general":
+        if intent_counts.get("guidance_forecast", 0) > 0:
+            insights["recommendations"].append("Forward-looking statements made — verify against subsequent filings")
+        if intent_counts.get("risk_warning", 0) > 0:
+            insights["recommendations"].append("Risk factors disclosed — flag for compliance review")
+        if len(amounts) > 5:
+            insights["recommendations"].append(f"{len(amounts)} financial figures discussed — cross-reference with filings")
+        if intent_counts.get("financial_disclosure", 0) > 5:
+            insights["recommendations"].append("Heavy financial disclosure — extract and reconcile with earnings report")
+        if len(orgs) > 3:
+            insights["recommendations"].append(f"{len(seen_orgs)} entities mentioned — verify counterparty relationships")
+
+    # Universal recommendations based on patterns
+    if total_words > 5000:
+        insights["recommendations"].append(f"Extended call ({total_words:,} words) — review key decision points")
+    if speaker_balance < 20.0 and len(unique_speakers) >= 2:
+        insights["recommendations"].append("Highly unbalanced speaker distribution — verify all parties were heard")
+    if intent_counts.get("info_request", 0) / total_intents > 0.5:
+        insights["recommendations"].append("Call dominated by information requests — consider proactive disclosure")
+
+    if not insights["recommendations"]:
+        insights["recommendations"].append("Standard call — no immediate action required")
+
+    return insights
 
 
 def _merge_entities(

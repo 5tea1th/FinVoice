@@ -21,6 +21,13 @@ class CallIntent(str, Enum):
     DISPUTE = "dispute"
     ACKNOWLEDGMENT = "acknowledgment"
     GREETING = "greeting"
+    # Financial / earnings call intents
+    FINANCIAL_DISCLOSURE = "financial_disclosure"
+    GUIDANCE_FORECAST = "guidance_forecast"
+    RISK_WARNING = "risk_warning"
+    QUESTION = "question"
+    EXPLANATION = "explanation"
+    PROCEDURAL = "procedural"
     UNKNOWN = "unknown"
 
 
@@ -261,3 +268,9 @@ class CallRecord(BaseModel):
     call_summary: str = Field(description="2-3 sentence natural language summary")
     key_outcomes: list[str] = Field(description="Bullet points of call outcomes")
     next_actions: list[str] = Field(description="Required follow-up actions")
+
+    # Financial Insights (synthesized analysis for end users)
+    financial_insights: dict = Field(
+        default_factory=dict,
+        description="Synthesized financial analysis: {key_metrics: [], risk_factors: [], recommendations: [], topic_sentiment: {}}"
+    )

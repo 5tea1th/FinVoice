@@ -486,18 +486,12 @@ async def compliance_reasoning(
 # ── Sync Wrappers (for non-async callers like the orchestrator) ──
 
 def store_call_record_sync(call_record: dict) -> dict | None:
-    """Synchronous wrapper for store_call_record."""
+    """Synchronous wrapper for store_call_record.
+
+    Called from background threads (pipeline), so always creates a fresh event loop.
+    """
     try:
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            # Already in an async context — schedule as task
-            import concurrent.futures
-            with concurrent.futures.ThreadPoolExecutor() as pool:
-                return pool.submit(
-                    asyncio.run, store_call_record(call_record)
-                ).result(timeout=30)
-        else:
-            return asyncio.run(store_call_record(call_record))
+        return asyncio.run(store_call_record(call_record))
     except Exception as e:
         logger.warning(f"Backboard sync store failed: {e}")
         return None
@@ -506,15 +500,7 @@ def store_call_record_sync(call_record: dict) -> dict | None:
 def store_customer_interaction_sync(customer_id: str, call_record: dict) -> dict | None:
     """Synchronous wrapper for store_customer_interaction."""
     try:
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            import concurrent.futures
-            with concurrent.futures.ThreadPoolExecutor() as pool:
-                return pool.submit(
-                    asyncio.run, store_customer_interaction(customer_id, call_record)
-                ).result(timeout=30)
-        else:
-            return asyncio.run(store_customer_interaction(customer_id, call_record))
+        return asyncio.run(store_customer_interaction(customer_id, call_record))
     except Exception as e:
         logger.warning(f"Backboard sync customer store failed: {e}")
         return None

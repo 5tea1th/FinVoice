@@ -65,26 +65,12 @@ def _get_model():
 
     import torch
 
-    # Meta tensor patch is applied globally in app.py at process startup
-
-    if torch.cuda.is_available():
-        logger.info("Loading emotion2vec_plus_large on GPU...")
-        try:
-            _model = AutoModel(
-                model="iic/emotion2vec_plus_large",
-                trust_remote_code=True,
-                device="cuda",
-                disable_update=True,
-            )
-            logger.info("emotion2vec loaded on GPU (~1GB VRAM)")
-        except Exception as e:
-            logger.error(f"emotion2vec GPU load failed: {e}")
-            _model = None
-
-        if _model is not None:
-            return _model
-
-    # Fallback to CPU
+    # PyTorch 2.8 fix: The global patches (app.py) cause meta tensors to persist
+    # even on CPU. FunASR loads model structure first (with meta tensors), then
+    # should load weights — but the patches interfere.
+    #
+    # Nuclear fix: after AutoModel creates the model, manually reload the checkpoint
+    # weights with assign=True, forcing real tensors to replace meta placeholders.
     logger.info("Loading emotion2vec_plus_large on CPU...")
     try:
         _model = AutoModel(
@@ -93,9 +79,62 @@ def _get_model():
             device="cpu",
             disable_update=True,
         )
-        logger.info("emotion2vec loaded on CPU")
+
+        # Find the checkpoint file and reload weights directly
+        ckpt_path = os.path.expanduser(
+            "~/.cache/modelscope/hub/models/iic/emotion2vec_plus_large/model.pt"
+        )
+        if os.path.exists(ckpt_path):
+            # Get the actual nn.Module inside FunASR's wrapper
+            inner_model = None
+            if hasattr(_model, 'model'):
+                inner_model = _model.model
+            elif hasattr(_model, 'module'):
+                inner_model = _model.module
+
+            if inner_model is not None and hasattr(inner_model, 'load_state_dict'):
+                # Count meta tensors before reload
+                meta_before = sum(
+                    1 for p in inner_model.parameters() if p.device.type == "meta"
+                )
+                if meta_before > 0:
+                    logger.info(f"emotion2vec: {meta_before} meta tensors detected, reloading weights...")
+                    checkpoint = torch.load(ckpt_path, map_location="cpu")
+                    # FunASR checkpoints often have a 'model' key wrapping state_dict
+                    if isinstance(checkpoint, dict) and 'model' in checkpoint:
+                        state_dict = checkpoint['model']
+                    elif isinstance(checkpoint, dict) and 'state_dict' in checkpoint:
+                        state_dict = checkpoint['state_dict']
+                    else:
+                        state_dict = checkpoint
+
+                    # Strip 'd2v_model.' prefix if present (FunASR naming convention)
+                    cleaned = {}
+                    for k, v in state_dict.items():
+                        clean_key = k.replace("d2v_model.", "") if k.startswith("d2v_model.") else k
+                        cleaned[clean_key] = v
+
+                    inner_model.load_state_dict(cleaned, strict=False, assign=True)
+                    meta_after = sum(
+                        1 for p in inner_model.parameters() if p.device.type == "meta"
+                    )
+                    logger.info(f"emotion2vec: weights reloaded, meta tensors {meta_before} → {meta_after}")
+
+                    # Also fix buffers
+                    for name, buf in list(inner_model.named_buffers()):
+                        if buf.device.type == "meta":
+                            parts = name.split(".")
+                            mod = inner_model
+                            for part in parts[:-1]:
+                                mod = getattr(mod, part)
+                            setattr(mod, parts[-1], torch.zeros_like(buf, device="cpu"))
+        else:
+            logger.warning(f"emotion2vec checkpoint not found at {ckpt_path}")
+
+        logger.info("emotion2vec loaded on CPU (PyTorch 2.8 safe)")
     except Exception as e:
         logger.error(f"emotion2vec failed to load: {e}")
+        logger.error(traceback.format_exc())
         _model = None
 
     return _model

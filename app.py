@@ -702,9 +702,14 @@ async def get_review_queue():
 @app.get("/api/backboard/status")
 async def backboard_status():
     """Check if Backboard.io is configured and reachable."""
+    calls_stored = 0
+    results_dir = Path("data/processed")
+    if results_dir.exists():
+        calls_stored = len(list(results_dir.glob("*_record.json")))
     return {
         "configured": backboard_configured(),
         "api_url": os.getenv("BACKBOARD_API_URL", "https://app.backboard.io/api"),
+        "calls_stored": calls_stored,
     }
 
 
@@ -755,11 +760,81 @@ async def link_call_to_customer(customer_id: str, body: dict):
     }
 
 
+def _build_local_context(call_id: str | None = None) -> str:
+    """Build a concise context string from local processed records for RAG."""
+    import json as _json
+    results_dir = Path("data/processed")
+    if not results_dir.exists():
+        return ""
+
+    records = []
+    if call_id:
+        p = results_dir / f"{call_id}_record.json"
+        if p.exists():
+            with open(p) as f:
+                records.append(_json.load(f))
+    else:
+        for p in sorted(results_dir.glob("*_record.json"))[-20:]:
+            try:
+                with open(p) as f:
+                    records.append(_json.load(f))
+            except Exception:
+                continue
+
+    if not records:
+        return ""
+
+    parts = []
+    for rec in records:
+        cid = rec.get("call_id", "?")
+        summary = rec.get("call_summary", "N/A")
+        if summary in ("N/A", "Call processed — see extracted fields.", "[2-3 sentence summary]"):
+            summary = ""
+        call_lines = [
+            f"[CALL {cid}] type={rec.get('call_type','general')} duration={rec.get('duration_seconds',0):.0f}s risk={rec.get('overall_risk_level','low')} compliance={rec.get('compliance_score',100)}/100 speakers={rec.get('num_speakers',0)}",
+        ]
+        if summary:
+            call_lines.append(f"Summary: {summary[:300]}")
+        # Outcomes
+        outcomes = rec.get("key_outcomes", [])
+        if outcomes and outcomes != ["See analysis fields"]:
+            call_lines.append(f"Outcomes: {'; '.join(str(o) for o in outcomes[:4])}")
+        # Financial entities — compact
+        ents = rec.get("financial_entities", [])
+        amounts = [e for e in ents if e.get("entity_type") in ("payment_amount", "currency_amount")]
+        orgs = [e for e in ents if e.get("entity_type") == "organization"]
+        people = [e for e in ents if e.get("entity_type") == "person_name"]
+        if amounts:
+            call_lines.append(f"Amounts: {', '.join(e.get('raw_text','') for e in amounts[:10])}")
+        if orgs:
+            call_lines.append(f"Organizations: {', '.join(e.get('value',e.get('raw_text','')) for e in orgs[:8])}")
+        if people:
+            call_lines.append(f"People: {', '.join(e.get('value',e.get('raw_text','')) for e in people[:6])}")
+        # Compliance violations
+        violations = [c for c in rec.get("compliance_checks", []) if not c.get("passed", True)]
+        if violations:
+            call_lines.append(f"Violations: {'; '.join(v.get('check_name','?') + ' [' + v.get('severity','?') + ']' for v in violations[:5])}")
+        # Fraud
+        fraud = rec.get("fraud_signals", [])
+        if fraud:
+            call_lines.append(f"Fraud: {'; '.join(s.get('signal_type','?') for s in fraud[:3])}")
+        # Key transcript passages (limit to ~5 most content-rich segments)
+        segs = rec.get("transcript_segments", [])
+        if segs:
+            # Pick segments with the most words for richer context
+            ranked = sorted(segs, key=lambda s: len(s.get("text", "").split()), reverse=True)
+            top = ranked[:5]
+            call_lines.append("Key passages: " + " | ".join(s.get("text", "").strip()[:200] for s in top))
+        parts.append("\n".join(call_lines))
+
+    return "\n\n".join(parts)
+
+
 @app.post("/api/audit/query")
 async def audit_query(body: dict):
-    """Query across ALL processed calls using Backboard's memory.
+    """Query across ALL processed calls using Backboard's memory with local RAG context.
 
-    Body: {"question": "Show me all calls with compliance violations"}
+    Body: {"question": "Show me all calls with compliance violations", "call_id": "optional"}
     """
     question = body.get("question", "")
     if not question:
@@ -768,8 +843,51 @@ async def audit_query(body: dict):
     if not backboard_configured():
         raise HTTPException(status_code=503, detail="Backboard not configured")
 
+    call_id = body.get("call_id")
+    local_context = _build_local_context(call_id)
+    local_context = _build_local_context(call_id)
+
+    # Try local Ollama first (faster, full context control), fall back to Backboard
+    if local_context:
+        try:
+            answer = await _local_llm_query(question, local_context)
+            return {"question": question, "answer": answer}
+        except Exception as e:
+            logger.warning(f"Local LLM query failed ({e}), falling back to Backboard")
+
     answer = await query_audit_trail(question)
     return {"question": question, "answer": answer}
+
+
+async def _local_llm_query(question: str, context: str) -> str:
+    """Answer a question using local Ollama with call data context."""
+    import httpx
+
+    ollama_url = os.getenv("OLLAMA_URL", "http://localhost:11434")
+    system = (
+        "You are FinVoice AI Analyst, an expert financial call intelligence assistant. "
+        "You have access to processed call recordings from a financial institution. "
+        "Answer questions using ONLY the provided call data. Be specific — cite call IDs, "
+        "quote transcript passages, and reference exact figures. "
+        "If the data doesn't contain the answer, say what data IS available."
+    )
+    prompt = f"=== CALL DATA ===\n{context}\n\n=== QUESTION ===\n{question}"
+
+    async with httpx.AsyncClient(timeout=120.0) as client:
+        resp = await client.post(
+            f"{ollama_url}/api/chat",
+            json={
+                "model": "qwen2.5:3b",
+                "messages": [
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": prompt},
+                ],
+                "stream": False,
+                "options": {"temperature": 0.3, "num_predict": 1024},
+            },
+        )
+        resp.raise_for_status()
+        return resp.json().get("message", {}).get("content", "No response")
 
 
 @app.post("/api/compliance/reason")

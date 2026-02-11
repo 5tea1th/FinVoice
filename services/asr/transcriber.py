@@ -195,8 +195,13 @@ def transcribe_audio(
     # this happens when Whisper mis-detects Hindi/code-switched audio as English
     if not language:  # only retry if language wasn't explicitly set
         seg_texts = [s.get("text", "").strip().lower() for s in result.get("segments", [])]
-        all_foreign = all(t in ("foreign", "") for t in seg_texts) if seg_texts else False
+        # Check if all segments contain only the word "foreign" (repeated any number of times)
+        # WhisperX outputs "foreign" when it can't transcribe detected non-English audio
+        all_foreign = bool(seg_texts) and all(
+            set(t.split()) <= {"foreign", ""} or t == "" for t in seg_texts
+        )
         no_segments = len(result.get("segments", [])) == 0
+        logger.debug(f"Foreign check — texts={seg_texts}, all_foreign={all_foreign}, no_segments={no_segments}")
         if all_foreign or no_segments:
             logger.warning("All segments are 'foreign' — retrying with language='hi'")
             # Need a language-specific model for Hindi — unload cached, load fresh
@@ -228,6 +233,7 @@ def transcribe_audio(
                 _saved_word_scores[key] = score
 
     # Word-level alignment
+    alignment_ok = False
     try:
         align_model, align_metadata = whisperx.load_align_model(
             language_code=detected_language, device="cuda"
@@ -236,8 +242,28 @@ def transcribe_audio(
             result["segments"], align_model, align_metadata, audio, device="cuda"
         )
         del align_model
+        alignment_ok = True
     except Exception as e:
         logger.warning(f"Word alignment failed (continuing without): {e}")
+        # Create synthetic word entries so diarization can still assign speakers.
+        # Distribute words evenly across the segment's time range.
+        for seg in result.get("segments", []):
+            if seg.get("words"):
+                continue
+            text = seg.get("text", "").strip()
+            words = text.split()
+            if not words:
+                continue
+            start = seg.get("start", 0)
+            end = seg.get("end", start + 1)
+            duration = end - start
+            word_dur = duration / len(words)
+            seg["words"] = [
+                {"word": w, "start": round(start + i * word_dur, 3),
+                 "end": round(start + (i + 1) * word_dur, 3), "score": 0.5}
+                for i, w in enumerate(words)
+            ]
+        logger.info("Created synthetic word timestamps for diarization")
 
     # Speaker diarization
     if hf_token:
