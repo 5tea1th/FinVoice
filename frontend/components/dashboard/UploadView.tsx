@@ -418,8 +418,18 @@ export default function UploadView() {
             <path d="M32 52 L32 38 M26 44 L32 38 L38 44" stroke="var(--text-dim)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
         </div>
-        <h3 style={{ fontFamily: 'var(--font-mono)' }}>Drop audio files or click to browse</h3>
-        <p style={{ fontSize: '0.875rem', color: 'var(--text-dim)' }}>Supports WAV, MP3, FLAC, OGG &middot; Max 500MB per file</p>
+        <h3 style={{ fontFamily: 'var(--font-mono)', position: 'relative' }}>Drop audio files or click to browse</h3>
+        <p style={{ fontSize: '0.85rem', color: 'var(--text-dim)', position: 'relative' }}>
+          WAV, MP3, FLAC, OGG &middot; Up to 500MB
+        </p>
+        <div style={{ display: 'flex', gap: 'var(--sp-3)', justifyContent: 'center', marginTop: 'var(--sp-3)', position: 'relative' }}>
+          {['Transcribe', 'Analyze', 'Comply', 'Export'].map((step, i) => (
+            <span key={step} style={{ fontFamily: 'var(--font-mono)', fontSize: '0.65rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 4 }}>
+              <span style={{ width: 6, height: 6, borderRadius: '50%', background: ['#6366f1', '#10b981', '#f59e0b', '#a855f7'][i], display: 'inline-block' }} />
+              {step}
+            </span>
+          ))}
+        </div>
         <input type="file" ref={fileInputRef} accept="audio/*" multiple hidden onChange={e => e.target.files && handleFiles(e.target.files)} />
       </div>
 
@@ -494,11 +504,14 @@ export default function UploadView() {
             <button
               onClick={processFiles}
               style={{
-                marginTop: 'var(--sp-4)', padding: '0.6rem 2rem',
+                marginTop: 'var(--sp-4)', padding: '0.75rem 2rem',
                 fontFamily: 'var(--font-mono)', fontSize: '0.9rem', fontWeight: 600,
-                background: 'var(--orange)', color: '#000', border: 'none',
-                borderRadius: '6px', cursor: 'pointer', width: '100%',
+                background: 'linear-gradient(135deg, var(--orange), #f59e0b)', color: '#000', border: 'none',
+                borderRadius: '8px', cursor: 'pointer', width: '100%',
+                transition: 'all .2s', boxShadow: '0 4px 16px color-mix(in srgb, var(--orange) 30%, transparent)',
               }}
+              onMouseOver={e => { (e.target as HTMLButtonElement).style.transform = 'translateY(-1px)'; (e.target as HTMLButtonElement).style.boxShadow = '0 6px 24px color-mix(in srgb, var(--orange) 40%, transparent)'; }}
+              onMouseOut={e => { (e.target as HTMLButtonElement).style.transform = 'none'; (e.target as HTMLButtonElement).style.boxShadow = '0 4px 16px color-mix(in srgb, var(--orange) 30%, transparent)'; }}
             >
               Process {files.filter(f => !f.done && !f.error && !f.callId).length > 1
                 ? `${files.filter(f => !f.done && !f.error && !f.callId).length} files`

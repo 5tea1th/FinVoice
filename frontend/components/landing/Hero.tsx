@@ -15,7 +15,7 @@ export default function Hero() {
 
           <div className="hero-title-block">
             <h1 className="hero-title-text">
-              FinSight
+              FinVoice
             </h1>
             <p className="hero-tagline">
               Raw bank calls &rarr; structured, auditable, ML-trainable data

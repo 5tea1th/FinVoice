@@ -8,6 +8,7 @@ import CallDetail from '@/components/dashboard/CallDetail';
 import ReviewQueue from '@/components/dashboard/ReviewQueue';
 import SettingsView from '@/components/dashboard/SettingsView';
 import ExportsView from '@/components/dashboard/ExportsView';
+import AiAnalyst from '@/components/dashboard/AiAnalyst';
 import { getCalls, type Call } from '@/lib/api';
 
 const VIEW_TITLES: Record<View, string> = {
@@ -123,6 +124,9 @@ export default function DashboardPage() {
           )}
         </div>
       </main>
+
+      {/* AI Analyst Panel */}
+      <AiAnalyst />
     </div>
   );
 }
